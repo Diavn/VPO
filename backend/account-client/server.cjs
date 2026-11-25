@@ -25,7 +25,7 @@ async function main(){
  const who=await db.query("SELECT session_user AS role,current_database() AS name");if(who.rows[0].role!=="vpo_accounts"||who.rows[0].name!=="vpo_ci")throw Error("Wrong role");
  const server=http.createServer({requestTimeout:10000,headersTimeout:5000,maxHeaderSize:8192},async(req,res)=>{
  try{
- if(req.headers.host!==c.host)throw fail(421,"HOST");
+ if(!S.hostAllowed(req.headers.host,c)){console.error("HOST_REJECTED",JSON.stringify(String(req.headers.host||"").slice(0,180)));throw fail(421,"HOST");}
  if(req.method==="GET"&&Object.hasOwn(assets,req.url)){const [file,type]=assets[req.url];return send(res,200,fs.readFileSync(path.join(__dirname,file)),type);}
  if(req.method!=="POST")throw fail(404,"NOT_FOUND");
  if(req.headers.origin!==c.origin)throw fail(403,"ORIGIN");
