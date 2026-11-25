@@ -6,7 +6,7 @@ const E=require("./exam.cjs"),P=require("./exam-policy.cjs"),W=require("./workfl
 const fs=require("node:fs"),pathLib=require("node:path");
 const demoAssets=Object.fromEntries([["/exam-demo","exam.html","text/html; charset=utf-8"],["/exam-demo.js","exam.js","text/javascript; charset=utf-8"],["/exam-demo.css","exam.css","text/css; charset=utf-8"]].map(([url,file,type])=>[url,{type,body:fs.readFileSync(pathLib.join(__dirname,"exam-client",file))}]));
 for(const [url,file,type] of [["/academy-demo","academy.html","text/html; charset=utf-8"],["/academy-demo.js","academy.js","text/javascript; charset=utf-8"],["/academy-demo.css","academy.css","text/css; charset=utf-8"]])demoAssets[url]={type,body:fs.readFileSync(pathLib.join(__dirname,"academy-client",file))};
-for(const [url,file,type] of [["/staging","staging.html","text/html; charset=utf-8"],["/staging.css","staging.css","text/css; charset=utf-8"],["/staging.js","staging.js","text/javascript; charset=utf-8"]])demoAssets[url]={type,body:fs.readFileSync(pathLib.join(__dirname,"staging-client",file))};
+for(const [url,file,type] of [["/staging","staging.html","text/html; charset=utf-8"],["/staging.css","staging.css","text/css; charset=utf-8"],["/staging.js","staging.js","text/javascript; charset=utf-8"],["/verify-demo","verify.html","text/html; charset=utf-8"],["/verify-demo.js","verify.js","text/javascript; charset=utf-8"]])demoAssets[url]={type,body:fs.readFileSync(pathLib.join(__dirname,"staging-client",file))};
 const c=S.config(process.env);
 const pool=new Pool({connectionString:process.env.DATABASE_URL,max:8,connectionTimeoutMillis:3000,idleTimeoutMillis:10000,statement_timeout:5000,query_timeout:6000});
 pool.on("error",()=>console.error("Database pool error"));
