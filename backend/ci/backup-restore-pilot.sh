@@ -40,10 +40,10 @@ END $$;
 ROLLBACK;
 BEGIN;
 SET LOCAL ROLE vpo_accounts;
-DO $ BEGIN
+DO $account_acl$ BEGIN
  IF NOT has_function_privilege(current_user,'vpo_stage.registration_finish(uuid,text,text)','EXECUTE') OR NOT has_function_privilege(current_user,'vpo_stage.account_admin_change(uuid,text)','EXECUTE') THEN RAISE EXCEPTION 'Missing account routine privilege'; END IF;
  IF has_table_privilege(current_user,'vpo_stage.registration_challenges','SELECT') OR has_table_privilege(current_user,'vpo_stage.users','UPDATE') OR has_table_privilege(current_user,'vpo_stage.demo_drafts','SELECT') THEN RAISE EXCEPTION 'Account direct grants invalid'; END IF;
-END $;
+END $account_acl$;
 ROLLBACK;
 SQL
 echo "RESTORE PASS: all 34 table row counts/content digests match, sampled ACL/RLS preserved; elapsed $(( $(date +%s)-start )) seconds."
