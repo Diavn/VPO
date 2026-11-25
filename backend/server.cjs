@@ -12,7 +12,7 @@ pool.on("error",()=>console.error("Database pool error"));
 const q=(sql,p=[])=>pool.query(sql,p);
 // V5.0: object-presence check only, not a substitute for migration or authorization tests.
 const expectedTables=["vpo_stage.users","vpo_stage.role_grants","vpo_stage.student_profiles","vpo_stage.sessions","vpo_stage.login_limits","vpo_stage.audit_events","vpo_stage.demo_rounds","vpo_stage.demo_enrolments","vpo_stage.demo_attempts","vpo_stage.demo_drafts","vpo_stage.demo_submissions","vpo_stage.demo_events","vpo_stage.demo_staff","vpo_stage.demo_marking_cases","vpo_stage.demo_marking_assignments","vpo_stage.demo_marks","vpo_stage.demo_results","vpo_stage.demo_appeals","vpo_stage.demo_orders","vpo_stage.demo_payment_reports","vpo_stage.demo_statement_lines","vpo_stage.demo_reconciliations","vpo_stage.demo_certificates","vpo_stage.demo_workflow_audit","vpo_stage.academy_courses","vpo_stage.academy_lessons","vpo_stage.academy_tasks","vpo_stage.academy_mentors","vpo_stage.academy_enrolments","vpo_stage.academy_completion","vpo_stage.academy_submissions","vpo_stage.academy_feedback"];
-const expectedRoutines=["vpo_stage.demo_score_vector(jsonb)","vpo_stage.demo_staff_action(text,uuid,jsonb)","vpo_stage.demo_student_action(uuid,text,uuid,jsonb)","vpo_stage.demo_verify_certificate(text)","vpo_stage.academy_student(uuid,text,uuid,jsonb)","vpo_stage.academy_mentor(text,uuid,jsonb)","vpo_stage.lock_student_session(text,uuid)"];
+const expectedRoutines=["vpo_stage.demo_score_vector(jsonb)","vpo_stage.demo_staff_action(text,uuid,jsonb)","vpo_stage.demo_student_action(uuid,text,uuid,jsonb)","vpo_stage.demo_verify_certificate(text)","vpo_stage.academy_student(uuid,text,uuid,jsonb)","vpo_stage.academy_mentor(text,uuid,jsonb)","vpo_stage.lock_student_session(text,uuid)","vpo_stage.issue_student_session(uuid,text,bigint,bigint)"];
 async function readiness(){
  const r=await q("SELECT current_user::text AS role, session_user::text AS login, (SELECT count(*)::int FROM unnest($1::text[]) AS x(n) WHERE to_regclass(n) IS NULL) AS missing_tables, (SELECT count(*)::int FROM unnest($2::text[]) AS x(n) WHERE to_regprocedure(n) IS NULL) AS missing_routines",[expectedTables,expectedRoutines]);
  const v=r.rows[0];if(v.role!=="vpo_runtime"||v.login!=="vpo_runtime"||v.missing_tables!==0||v.missing_routines!==0)throw Error("Synthetic runtime role or schema incomplete");
@@ -25,11 +25,21 @@ async function lockSession(db,a){
 const fail=(status,code)=>Object.assign(Error(code),{status,code});
 function cookie(token,clear=false){return c.cookie+"="+(clear?"":token)+"; Path=/; HttpOnly; SameSite=Strict; Max-Age="+(clear?"0":"28800")+(c.secure?"; Secure":"");}
 function reply(res,status,value,extra={}){res.writeHead(status,{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store","X-Content-Type-Options":"nosniff","X-Frame-Options":"DENY","Referrer-Policy":"no-referrer","Content-Security-Policy":"default-src 'none'; frame-ancestors 'none'; base-uri 'none'","Permissions-Policy":"camera=(), microphone=(), geolocation=()",...(c.secure?{"Strict-Transport-Security":"max-age=31536000"}:{}),...extra});res.end(JSON.stringify(value));}
-async function body(req,maxBytes=8192){if(req.headers["content-type"]?.split(";")[0].trim().toLowerCase()!=="application/json")throw fail(415,"JSON_REQUIRED");const chunks=[];let size=0;for await(const part of req){size+=part.length;if(size>maxBytes)throw fail(413,"BODY_TOO_LARGE");chunks.push(part);}try{const b=JSON.parse(Buffer.concat(chunks).toString("utf8"));if(!b||typeof b!=="object"||Array.isArray(b))throw Error();return b;}catch{throw fail(400,"INVALID_JSON");}}
+async function body(req,maxBytes=8192){
+ const type=req.headers["content-type"];
+ if(typeof type!=="string"||!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(type.trim()))throw fail(415,"JSON_REQUIRED");
+ if(req.headers["content-encoding"]&&req.headers["content-encoding"]!=="identity")throw fail(415,"ENCODING_NOT_SUPPORTED");
+ const len=req.headers["content-length"];
+ if(len!==undefined&&(!/^\d+$/.test(len)||Number(len)>maxBytes))throw fail(413,"BODY_TOO_LARGE");
+ const chunks=[];let size=0;
+ // Avoid unbounded buffering; on chunked overrun Node may close the request.
+ for await(const part of req){size+=part.length;if(size>maxBytes)throw fail(413,"BODY_TOO_LARGE");chunks.push(part);}
+ try{const b=JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(Buffer.concat(chunks)));if(!b||typeof b!=="object"||Array.isArray(b))throw Error();return b;}catch{throw fail(400,"INVALID_JSON");}
+}
 async function tx(fn){const db=await pool.connect();try{await db.query("BEGIN");const v=await fn(db);await db.query("COMMIT");return v;}catch(e){await db.query("ROLLBACK").catch(()=>{});throw e;}finally{db.release();}}
 async function limit(bucket,max){const r=await q("INSERT INTO vpo_stage.login_limits(bucket,window_start,hits) VALUES($1,date_bin('15 minutes',now(),TIMESTAMPTZ '2000-01-01'),1) ON CONFLICT(bucket,window_start) DO UPDATE SET hits=LEAST(vpo_stage.login_limits.hits+1,10000) RETURNING hits",[bucket]);if(r.rows[0].hits>max)throw fail(429,"TRY_LATER");}
 async function auth(req){const token=S.readToken(req.headers.cookie,c.cookie);if(!token)throw fail(401,"UNAUTHENTICATED");const hash=S.digest(token);
- const r=await q("UPDATE vpo_stage.sessions s SET idle_until=LEAST(s.expires_at,now()+interval '30 minutes') FROM vpo_stage.users u WHERE s.token_hash=$1 AND s.user_id=u.id AND u.status='ACTIVE' AND s.expires_at>now() AND s.idle_until>now() AND EXISTS(SELECT 1 FROM vpo_stage.role_grants g WHERE g.user_id=u.id AND g.role='student' AND g.revoked_at IS NULL) RETURNING s.user_id",[hash]);
+ const r=await q("UPDATE vpo_stage.sessions s SET idle_until=LEAST(s.expires_at,now()+interval '30 minutes') FROM vpo_stage.users u WHERE s.token_hash=$1 AND s.user_id=u.id AND u.status='ACTIVE' AND s.expires_at>now() AND s.idle_until>now() AND EXISTS(SELECT 1 FROM vpo_stage.role_grants g WHERE g.user_id=u.id AND g.role='student' AND g.revoked_at IS NULL AND g.auth_epoch=s.grant_epoch) AND u.auth_epoch=s.user_epoch RETURNING s.user_id",[hash]);
  if(r.rowCount!==1)throw fail(401,"UNAUTHENTICATED");return {id:r.rows[0].user_id,hash,token};}
 function requireCsrf(req,a){if(!S.eq(req.headers["x-csrf-token"],S.csrf(a.token,c.key)))throw fail(403,"CSRF_REQUIRED");}
 const projection="student_code,name_vi,name_latin,grade,curriculum,locale,version";
@@ -39,17 +49,18 @@ async function handle(req,res){
  if(!["GET","POST","PATCH","PUT"].includes(req.method))throw fail(405,"METHOD_NOT_ALLOWED");
  if(req.method!=="GET"&&req.headers.origin!==c.origin)throw fail(403,"ORIGIN_REQUIRED");
  const path=req.url;
- if(req.method==="GET"&&Object.hasOwn(demoAssets,path)){const a=demoAssets[path];res.writeHead(200,{"Content-Type":a.type,"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","X-Frame-Options":"DENY","Referrer-Policy":"no-referrer","Content-Security-Policy":"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"});return res.end(a.body);}
+ if(typeof path!=="string"||!path.startsWith("/")||path.startsWith("//")||path.length>2048)throw fail(400,"INVALID_PATH");
+ if(req.method==="GET"&&Object.hasOwn(demoAssets,path)){const a=demoAssets[path];res.writeHead(200,{"Content-Type":a.type,"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","X-Frame-Options":"DENY","Referrer-Policy":"no-referrer","Permissions-Policy":"camera=(), microphone=(), geolocation=()","Cross-Origin-Resource-Policy":"same-origin",...(c.secure?{"Strict-Transport-Security":"max-age=31536000"}:{}),"Content-Security-Policy":"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"});return res.end(a.body);}
  if(path==="/healthz"&&req.method==="GET"){try{await readiness();}catch{return reply(res,503,{status:"not_ready",mode:"synthetic-staging"});}return reply(res,200,{status:"ok",mode:"synthetic-staging"});}
  if(path==="/auth/login"&&req.method==="POST"){
   await limit("global",120);const b=await body(req);
   if(Object.keys(b).sort().join(",")!=="email,password"||!S.validEmail(b.email)||!S.validPassword(b.password))throw fail(400,"SYNTHETIC_CREDENTIALS_REQUIRED");
   await limit("account:"+S.accountBucket(b.email,c.key),8);
   if(activeHashes>=2)throw fail(503,"TRY_LATER");activeHashes++;
-  let user,ok;try{const r=await q("SELECT u.id,u.password_hash FROM vpo_stage.users u WHERE u.email=$1 AND u.status='ACTIVE' AND EXISTS(SELECT 1 FROM vpo_stage.role_grants g WHERE g.user_id=u.id AND g.role='student' AND g.revoked_at IS NULL)",[b.email]);user=r.rows[0];ok=await S.verifyPassword(b.password,user?.password_hash||dummy);}finally{activeHashes--;}
+  let user,ok;try{const r=await q("SELECT u.id,u.password_hash,u.auth_epoch AS user_epoch,g.auth_epoch AS grant_epoch FROM vpo_stage.users u JOIN vpo_stage.role_grants g ON g.user_id=u.id WHERE u.email=$1 AND u.status='ACTIVE' AND g.role='student' AND g.revoked_at IS NULL",[b.email]);user=r.rows[0];ok=await S.verifyPassword(b.password,user?.password_hash||dummy);}finally{activeHashes--;}
   if(!user||!ok)throw fail(401,"INVALID_CREDENTIALS");
   const token=S.hex(32);const prior=S.readToken(req.headers.cookie,c.cookie);
-  await tx(async db=>{if(prior)await db.query("DELETE FROM vpo_stage.sessions WHERE token_hash=$1 AND user_id=$2",[S.digest(prior),user.id]);await db.query("INSERT INTO vpo_stage.sessions(token_hash,user_id,expires_at,idle_until) VALUES($1,$2,now()+interval '8 hours',now()+interval '30 minutes')",[S.digest(token),user.id]);await db.query("INSERT INTO vpo_stage.audit_events(user_id,event) VALUES($1,'LOGIN_OK')",[user.id]);});
+  await tx(async db=>{if(prior)await db.query("DELETE FROM vpo_stage.sessions WHERE token_hash=$1 AND user_id=$2",[S.digest(prior),user.id]);const issued=await db.query("SELECT vpo_stage.issue_student_session($1,$2,$3,$4) AS ok",[user.id,S.digest(token),user.user_epoch,user.grant_epoch]);if(!issued.rows[0].ok)throw fail(401,"INVALID_CREDENTIALS");await db.query("INSERT INTO vpo_stage.audit_events(user_id,event) VALUES($1,'LOGIN_OK')",[user.id]);});
   return reply(res,200,{role:"student",csrf:S.csrf(token,c.key),mode:"synthetic-staging"},{"Set-Cookie":cookie(token)});
  }
  if(path==="/me"&&req.method==="GET"){
