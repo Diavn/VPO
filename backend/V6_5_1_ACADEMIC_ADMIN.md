@@ -1,0 +1,14 @@
+# V6.5.1 — Academic administration (synthetic)
+Verified base: V6.5 exact commit 61f2527b86e81ece795be2c12fe3afab713859a7; Actions 45672026047/job 139409562796 success. 32 unit tests, CMS lifecycle, student isolation, load 24, 36-table restore. Actual Codespaces browser acceptance remains pending.
+
+## Question bank
+Admin can add immutable plain-text versions, unique DEMO code and integer version; new versions rather than edit/delete. Same identifier and payload replay is accepted; conflicting payload rejected. Round creation from selected version copies topic into the existing round, retains question version reference and creates matching audit reference in the same transaction. Existing manual topic route retained for compatibility. No question content in student discovery or admin audit list. Existing server preflight and attempt topic snapshot remain authoritative. Question list limited to 100 latest versions. This is an internal mock bank, not an independently reviewed or confidential production exam bank. Single Admin can see all synthetic questions, no editorial roles or approval workflow.
+
+## Academy
+Admin selects an existing seeded course and mentor and enrols an active email-verified student. Duplicate enrolment with same mentor returns existing id; conflicting mentor rejected. No direct table write permission. Audit includes course reference. Student continues via own course links. No creation/edit of course curriculum, mentor identity onboarding, reassignment, withdrawal, billing or mentor web UI; existing mentor operator workflow remains.
+
+## Verification
+14 migrations, 37 tables expected. Full regression retained; added browser question creation and selection, replay/conflict, earlier-version topic on actual attempt, Academy enrolment from UI replacing fixture-owner enrolment insertion, duplicate/unverified denial, audit references, unauthenticated routes and sampled restore grants. CI pending; no PASS claim until exact commit run completes. Direct immutable trigger and concurrent first-create tests still require explicit dedicated checks. No real data, no email provider/MFA, no production, no merge. Use V6.5 until CI and human UAT. Public main untouched.
+
+## V6.5.2 stabilization
+V6.5.1 exact commit 922960b5303f5cf74aea9186f2ec0df26149b749, Actions 45683567596 / job 139450230096: academic admin, question snapshot, CMS, exam, Academy and synthetic recovery PASS; complete regression failed at the registration fixture for recovery edge cases (HTTP 429). Shared account global 100-request/60-second limit is the likely binding constraint, not an observed database error. Preserve all limits; regression groups now separated by a 61-second cooldown. Added concurrent first-create replay and direct database owner update/delete rejection checks. Await exact-commit CI. No schema change, no production or merge. Finance/results/certificates work deferred until regression passes.

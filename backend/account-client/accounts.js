@@ -1,7 +1,7 @@
-"use strict";const $=id=>document.getElementById(id);let token="",busy=false,pendingRound=null,contentEdit=null;
+"use strict";const $=id=>document.getElementById(id);let token="",busy=false,pendingRound=null,contentEdit=null,pendingQuestion=null;
 async function api(path,b){const r=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json",...(token?{Authorization:"Bearer "+token}:{})},body:JSON.stringify(b),cache:"no-store",signal:AbortSignal.timeout(15000)});const j=await r.json();if(!r.ok)throw Object.assign(Error(j.error||"HTTP "+r.status),{status:r.status});return j;}
 async function run(fn){if(busy)return;busy=true;document.querySelectorAll("button").forEach(b=>b.disabled=true);try{await fn();}catch(e){if(e.status===401&&token)clear();$("status").textContent="Không hoàn tất: "+e.message;}finally{busy=false;document.querySelectorAll("button").forEach(b=>b.disabled=false);}}
-function clear(){token="";pendingRound=null;contentEdit=null;if($("workspace")){$("workspace").hidden=true;$("login").hidden=false;$("users").replaceChildren();$("invited").textContent="";$("password").value="";for(const id of ["overview","rounds","audit","content-list"])$(id)?.replaceChildren();$("enrol-round")?.replaceChildren(new Option("Chọn vòng thi",""));$("round-created").textContent="";$("round-topic").value="";$("round-label").value="DEMO ";$("round-open").value="";$("round-close").value="";$("content-title").value="";$("content-body").value="";$("content-status").textContent="";}if($("newpass")){$("newpass").value="";$("code").value="";}}
+function clear(){token="";pendingRound=null;contentEdit=null;pendingQuestion=null;if($("workspace")){$("workspace").hidden=true;$("login").hidden=false;$("users").replaceChildren();$("invited").textContent="";$("password").value="";for(const id of ["overview","rounds","audit","content-list","question-list"])$(id)?.replaceChildren();$("enrol-round")?.replaceChildren(new Option("Chọn vòng thi",""));$("round-created").textContent="";$("round-topic").value="";$("round-label").value="DEMO ";$("round-open").value="";$("round-close").value="";$("content-title").value="";$("content-body").value="";$("content-status").textContent="";$("question-topic").value="";$("question-status").textContent="";$("round-question").replaceChildren(new Option("Nhập đề trực tiếp",""));$("academy-course").replaceChildren();$("academy-mentor").replaceChildren();}if($("newpass")){$("newpass").value="";$("code").value="";}}
 if(document.body.dataset.page==="admin"){
  function node(tag,text,cls){const n=document.createElement(tag);n.textContent=text;if(cls)n.className=cls;return n;}
  function localTime(value){return new Date(value).toLocaleString("vi-VN",{timeZoneName:"short"});}
@@ -19,8 +19,25 @@ if(document.body.dataset.page==="admin"){
   }
   if([...select.options].some(o=>o.value===previous))select.value=previous;
   $("audit").replaceChildren();
-  for(const event of audit.data)$("audit").append(node("div",localTime(event.created_at)+" · "+event.action+" · "+(event.email||"")+" "+(event.round_label||""),"audit-event"));
+  for(const event of audit.data)$("audit").append(node("div",localTime(event.created_at)+" · "+event.action+" · "+(event.email||"")+" "+(event.round_label||"")+" "+(event.question_code?event.question_code+" v"+event.question_version:"")+" "+(event.course_title||""),"audit-event"));
  }
+ async function academicCatalog(){
+  const [q,a]=await Promise.all([api("/api/admin/question-list",{}),api("/api/admin/academy-catalog",{})]);
+  const choices=(id,items,placeholder)=>{const sel=$(id),old=sel.value;sel.replaceChildren(new Option(placeholder,""));for(const v of items)sel.add(new Option(v.label,v.id));if([...sel.options].some(v=>v.value===old))sel.value=old;};
+  choices("round-question",q.data.map(v=>({id:v.id,label:v.code+" · v"+v.version})),"Nhập đề trực tiếp");
+  $("question-list").replaceChildren();for(const v of q.data){const d=node("div","","round");d.append(node("p",v.code+" · v"+v.version),node("p",v.topic,"content-body"));$("question-list").append(d);}
+  choices("academy-course",a.data.courses.map(v=>({id:v.id,label:v.title+" · v"+v.version})),"Chọn khóa học");
+  choices("academy-mentor",a.data.mentors.map(v=>({id:v,label:v})),"Chọn mentor");
+ }
+ $("academic-refresh").onclick=()=>run(academicCatalog);
+ $("question-add").onclick=()=>run(async()=>{
+  const data={code:$("question-code").value.trim().toUpperCase(),version:Number($("question-version").value),topic:$("question-topic").value.trim()};
+  if(!confirm("Lưu phiên bản đề bất biến?"))return;
+  const encoded=JSON.stringify(data);if(pendingQuestion&&pendingQuestion.encoded!==encoded)throw Error("Yêu cầu trước chưa xác nhận. Giữ nguyên dữ liệu để thử lại.");
+  if(!pendingQuestion)pendingQuestion={id:crypto.randomUUID(),encoded};
+  const id=pendingQuestion.id;try{await api("/api/admin/question-add",{...data,id});}catch(err){if([422,409].includes(err.status))pendingQuestion=null;throw err;}pendingQuestion=null;
+  $("question-status").textContent="Đã lưu phiên bản đề";$("question-topic").value="";await academicCatalog();$("round-question").value=id;
+ });
  function newContent(){contentEdit=null;$("content-title").value="";$("content-body").value="";$("content-status").textContent="Bản nháp mới";}
  async function contentList(){
   const r=await api("/api/admin/content-list",{}),root=$("content-list");root.replaceChildren();
@@ -37,16 +54,17 @@ if(document.body.dataset.page==="admin"){
  $("create-round").onclick=()=>run(async()=>{
   const open=new Date($("round-open").value),close=new Date($("round-close").value);
   if(!Number.isFinite(open.getTime())||!Number.isFinite(close.getTime()))throw Error("Chọn giờ mở và đóng hợp lệ");
-  const b={label:$("round-label").value.trim(),opens_at:open.toISOString(),closes_at:close.toISOString(),duration_seconds:Number($("round-duration").value),topic:$("round-topic").value.trim()};
+  const question_id=$("round-question").value;
+  const b={label:$("round-label").value.trim(),opens_at:open.toISOString(),closes_at:close.toISOString(),duration_seconds:Number($("round-duration").value),...(question_id?{question_id}:{topic:$("round-topic").value.trim()})};
   if(!confirm("Tạo vòng thi mẫu? Không thể sửa hoặc xóa vòng ở phiên bản này."))return;
   const encoded=JSON.stringify(b);
   if(pendingRound&&pendingRound.encoded!==encoded)throw Error("Có yêu cầu chưa xác nhận. Khôi phục nội dung cũ để gửi lại hoặc kiểm tra danh sách vòng thi trước khi tải lại trang.");
   if(!pendingRound)pendingRound={encoded,id:crypto.randomUUID()};
-  let r;try{r=await api("/api/admin/round-create",{...b,op_id:pendingRound.id});}catch(err){if(err.status===422)pendingRound=null;throw err;}pendingRound=null;
+  let r;try{r=await api(question_id?"/api/admin/round-from-question":"/api/admin/round-create",{...b,op_id:pendingRound.id});}catch(err){if(err.status===422)pendingRound=null;throw err;}pendingRound=null;
   $("round-created").textContent="Đã tạo vòng: "+r.id;$("round-topic").value="";await dashboard();$("enrol-round").value=r.id;
  });
- async function list(){const r=await api("/api/admin/users",{search:$("search").value});$("users").replaceChildren();for(const u of r.data){const row=document.createElement("div");row.className="user";const label=document.createElement("p");label.textContent=u.email+" · "+u.status+" · "+(u.email_verified_at?"Email đã xác thực":"Tài khoản mẫu tạo bởi operator");row.append(label);if(u.status!=="DELETED")for(const [op,name] of [[u.status==="ACTIVE"?"suspend":"activate",u.status==="ACTIVE"?"Khóa":"Mở khóa"],["delete","Xóa user"]]){const b=document.createElement("button");b.textContent=name;if(op==="delete")b.className="delete";b.onclick=()=>run(async()=>{if(!confirm(name+" "+u.email+"?"))return;await api("/api/admin/change",{id:u.id,op});await list();await dashboard();$("status").textContent="Đã cập nhật.";});row.append(b);} if(u.status==="ACTIVE"&&u.email_verified_at){const b=node("button","Ghi danh");b.type="button";b.onclick=()=>run(async()=>{const round_id=$("enrol-round").value;if(!round_id)throw Error("Chọn vòng thi trước");if(!confirm("Ghi danh "+u.email+" vào vòng đã chọn?"))return;const r=await api("/api/admin/enrol",{user_id:u.id,round_id});await dashboard();$("status").textContent=r.result==="CREATED"?"Đã ghi danh.":"Đã ghi danh trước đó.";});row.append(b);} $("users").append(row);}}
- $("signin").onclick=()=>run(async()=>{try{const r=await api("/api/admin/login",{username:$("username").value,password:$("password").value});token=r.token;}finally{$("password").value="";}await list();await dashboard();$("workspace").hidden=false;$("login").hidden=true;$("status").textContent="Đã đăng nhập admin.";});
+ async function list(){const r=await api("/api/admin/users",{search:$("search").value});$("users").replaceChildren();for(const u of r.data){const row=document.createElement("div");row.className="user";const label=document.createElement("p");label.textContent=u.email+" · "+u.status+" · "+(u.email_verified_at?"Email đã xác thực":"Tài khoản mẫu tạo bởi operator");row.append(label);if(u.status!=="DELETED")for(const [op,name] of [[u.status==="ACTIVE"?"suspend":"activate",u.status==="ACTIVE"?"Khóa":"Mở khóa"],["delete","Xóa user"]]){const b=document.createElement("button");b.textContent=name;if(op==="delete")b.className="delete";b.onclick=()=>run(async()=>{if(!confirm(name+" "+u.email+"?"))return;await api("/api/admin/change",{id:u.id,op});await list();await dashboard();$("status").textContent="Đã cập nhật.";});row.append(b);} if(u.status==="ACTIVE"&&u.email_verified_at){const b=node("button","Ghi danh");b.type="button";b.onclick=()=>run(async()=>{const round_id=$("enrol-round").value;if(!round_id)throw Error("Chọn vòng thi trước");if(!confirm("Ghi danh "+u.email+" vào vòng đã chọn?"))return;const r=await api("/api/admin/enrol",{user_id:u.id,round_id});await dashboard();$("status").textContent=r.result==="CREATED"?"Đã ghi danh.":"Đã ghi danh trước đó.";});row.append(b);const academy=node("button","Ghi danh Academy");academy.onclick=()=>run(async()=>{const course_id=$("academy-course").value,mentor=$("academy-mentor").value;if(!course_id||!mentor)throw Error("Chọn khóa học và mentor trước");if(!confirm("Ghi danh Academy "+u.email+"?"))return;const result=await api("/api/admin/academy-enrol",{user_id:u.id,course_id,mentor});await dashboard();$("status").textContent=result.result==="CREATED"?"Đã ghi danh Academy.":"Đã ghi danh Academy trước đó.";});row.append(academy);} $("users").append(row);}}
+ $("signin").onclick=()=>run(async()=>{try{const r=await api("/api/admin/login",{username:$("username").value,password:$("password").value});token=r.token;}finally{$("password").value="";}await list();await dashboard();await academicCatalog();$("workspace").hidden=false;$("login").hidden=true;$("status").textContent="Đã đăng nhập admin.";});
  $("find").onclick=()=>run(list);$("add").onclick=()=>run(async()=>{const r=await api("/api/admin/invite",{email:$("invite").value.trim().toLowerCase()});$("invited").textContent="Mã yêu cầu: "+r.challenge_id+" — kiểm tra hộp thư mẫu."});
  $("logout").onclick=()=>run(async()=>{try{await api("/api/admin/logout",{});}finally{clear();}$("status").textContent="Đã đăng xuất.";});
 }else{

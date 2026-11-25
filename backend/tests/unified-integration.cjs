@@ -12,7 +12,7 @@ async function main(){
  for(const p of ["/backend/schema.sql","/.git/config","/VPO/../backend/schema.sql","/VPO/%2e%2e/backend/security.cjs","/api/admin/unknown","/api/action"])assert.equal((await fetch(base+p)).status,404);
  assert.equal((await fetch(base+"/me/rounds")).status,401);
  const bad=await fetch(base+"/api/admin/login",{method:"POST",headers:{Origin:"http://foreign.example.test","Content-Type":"application/json"},body:"{}"});assert.equal(bad.status,403);
- for(const route of ["overview","rounds","audit","round-create","enrol","content-list","content-save","content-transition"]){const denied=await fetch(base+"/api/admin/"+route,{method:"POST",headers:{Origin:base,"Content-Type":"application/json"},body:"{}"});assert.equal(denied.status,401);}
+ for(const route of ["overview","rounds","audit","round-create","enrol","content-list","content-save","content-transition","question-list","question-add","round-from-question","academy-catalog","academy-enrol"]){const denied=await fetch(base+"/api/admin/"+route,{method:"POST",headers:{Origin:base,"Content-Type":"application/json"},body:"{}"});assert.equal(denied.status,401);}
  async function adminCall(route,body,token){const r=await fetch(base+"/api/admin/"+route,{method:"POST",headers:{Origin:base,"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});return {status:r.status,data:await r.json()};}
  // First isolate the HTTP gateway from browser behavior, without consuming a real email.
  const probeEmail="gateway-probe-"+randomBytes(6).toString("hex")+"@example.test";
@@ -41,10 +41,20 @@ async function main(){
  assert.equal(await p.locator("#overview .metric").count(),8);
  await p.locator("#search").fill(email);await p.locator("#find").click();await p.waitForFunction(()=>document.querySelectorAll("#users .user").length===1);await p.locator("#users .user").getByText(email,{exact:false}).waitFor();
  const dates=await p.evaluate(()=>{function fmt(n){const d=new Date(n);return new Date(n-d.getTimezoneOffset()*60000).toISOString().slice(0,19);}return {open:fmt(Date.now()-30000),close:fmt(Date.now()+600000)};});
+ const qcode="DEMO-Q-"+randomBytes(4).toString("hex").toUpperCase(),qtopic="Synthetic unified question";
+ await p.locator("#question-code").fill(qcode);await p.locator("#question-topic").fill(qtopic);p.once("dialog",d=>d.accept());
+ const qresponse=await postClick("#question-add","/api/admin/question-add",201),qpayload=qresponse.request().postDataJSON();
+ await p.waitForFunction(id=>document.querySelector("#round-question").value===id,qpayload.id);
+ assert.equal((await adminCall("question-add",qpayload,adminToken)).status,200);
+ assert.equal((await adminCall("question-add",{...qpayload,topic:"Conflicting synthetic question"},adminToken)).status,409);
+ const q2={...qpayload,id:require("node:crypto").randomUUID(),version:2,topic:"New version of synthetic question"};
+ const firstCreate=await Promise.all([adminCall("question-add",q2,adminToken),adminCall("question-add",q2,adminToken)]);
+ assert.deepEqual(firstCreate.map(v=>v.status).sort((a,b)=>a-b),[200,201]);
+ assert.deepEqual(firstCreate.map(v=>v.data.result).sort(),["CREATED","REPLAY"]);
  const label="DEMO admin-created round "+randomBytes(4).toString("hex");
  await p.locator("#round-label").fill(label);await p.locator("#round-open").fill(dates.open);await p.locator("#round-close").fill(dates.close);await p.locator("#round-duration").fill("180");await p.locator("#round-topic").fill("Synthetic unified question");
- p.once("dialog",d=>d.accept());const created=await postClick("#create-round","/api/admin/round-create",201);const round=(await created.json()).id,roundPayload=created.request().postDataJSON();
- const replays=await Promise.all([adminCall("round-create",roundPayload,adminToken),adminCall("round-create",roundPayload,adminToken)]);for(const r of replays){assert.equal(r.status,200);assert.equal(r.data.id,round);assert.equal(r.data.result,"REPLAY");}assert.equal((await adminCall("round-create",{...roundPayload,topic:"Different synthetic topic"},adminToken)).status,409);
+ p.once("dialog",d=>d.accept());const created=await postClick("#create-round","/api/admin/round-from-question",201);const round=(await created.json()).id,roundPayload=created.request().postDataJSON();
+ const replays=await Promise.all([adminCall("round-from-question",roundPayload,adminToken),adminCall("round-from-question",roundPayload,adminToken)]);for(const r of replays){assert.equal(r.status,200);assert.equal(r.data.id,round);assert.equal(r.data.result,"REPLAY");}assert.equal((await adminCall("round-from-question",{...roundPayload,question_id:q2.id},adminToken)).status,409);
  await p.waitForFunction(id=>document.querySelector("#enrol-round").value===id,round);
  p.once("dialog",d=>d.accept());await postClick("#users button:text-is('Ghi danh')","/api/admin/enrol",201);
  await p.waitForFunction(()=>document.querySelector("#status").textContent==="Đã ghi danh.");
@@ -55,6 +65,18 @@ async function main(){
  const journal=await adminCall("audit",{},adminToken);assert.equal(journal.data.data.filter(x=>x.action==="ENROLLED"&&x.round_id===round&&x.user_id===uid).length,1);assert.equal(journal.data.data.filter(x=>x.action==="ROUND_CREATED"&&x.round_id===round).length,1);
  assert.equal((await adminCall("round-create",{label:"invalid",opens_at:new Date().toISOString(),closes_at:new Date(Date.now()+600000).toISOString(),duration_seconds:60,topic:"x"},adminToken)).status,422);
  const fake=await adminCall("users",{search:e.VPO_TEST_B_EMAIL},adminToken);assert.equal((await adminCall("enrol",{user_id:fake.data.data[0].id,round_id:round},adminToken)).status,409);
+ const catalog=(await adminCall("academy-catalog",{},adminToken)).data.data;assert(catalog.courses.length&&catalog.mentors.length);
+ const course_id=catalog.courses[0].id,mentor=catalog.mentors[0];
+ await p.locator("#academy-course").selectOption(course_id);await p.locator("#academy-mentor").selectOption(mentor);
+ p.once("dialog",d=>d.accept());await postClick("#users button:text-is('Ghi danh Academy')","/api/admin/academy-enrol",201);
+ await p.waitForFunction(()=>document.querySelector("#status").textContent==="Đã ghi danh Academy.");
+ const duplicate=await adminCall("academy-enrol",{user_id:uid,course_id,mentor},adminToken);assert.equal(duplicate.status,200);assert.equal(duplicate.data.result,"EXISTS");
+ assert.equal((await adminCall("academy-enrol",{user_id:fake.data.data[0].id,course_id,mentor},adminToken)).status,409);
+ const academicAudit=(await adminCall("audit",{},adminToken)).data.data;
+ assert.equal(academicAudit.filter(x=>x.action==="QUESTION_CREATED"&&x.question_version_id===qpayload.id).length,1);
+ assert(academicAudit.some(x=>x.action==="ROUND_CREATED"&&x.round_id===round&&x.question_version_id===qpayload.id));
+ assert.equal(academicAudit.filter(x=>x.action==="ACADEMY_ENROLLED"&&x.user_id===uid&&x.course_id===course_id).length,1);
+ console.log("ACADEMIC ADMIN PASS: immutable question version creation and replay, version-specific round, browser Academy enrolment, duplicate and unverified denial, audit.");
  const title="DEMO bulletin "+randomBytes(4).toString("hex"),literal="<b>Plain text only</b>";
  await p.locator("#content-title").fill(title);await p.locator("#content-body").fill(literal);
  await postClick("#content-save","/api/admin/content-save",201);
@@ -76,16 +98,13 @@ async function main(){
  console.log("ADMIN CENTER PASS: dashboard, browser round creation and verified enrolment, duplicate idempotence, journal and authorization.");
  // Separate admin logout must not remove the student session.
  assert.equal((await ctx.request.get(base+"/me")).status(),200);
- // Academy enrolment remains fixture-owner only; exam enrolment was created by Admin UI.
- const db=new Client({connectionString:e.VPO_CI_OWNER_DB,statement_timeout:10000,connectionTimeoutMillis:3000});
- try{await db.connect();const role=(await db.query("SELECT current_database() AS db,session_user AS role")).rows[0];assert.deepEqual(role,{db:"vpo_ci",role:"vpo_migrator"});
- const en=await db.query("INSERT INTO vpo_stage.academy_enrolments(course_id,user_id,mentor) SELECT course_id,$1,mentor FROM vpo_stage.academy_enrolments WHERE id=$2 RETURNING id",[uid,e.VPO_TEST_ACADEMY_ENROLMENT]);assert.equal(en.rowCount,1);
- }finally{await db.end();}
  await p.goto(base+"/staging");await p.locator("#dashboard").waitFor({state:"visible"});
  const own=await ctx.request.get(base+"/me/rounds");assert.equal(own.status(),200);const my=(await own.json()).data;assert(my.some(v=>v.id===round&&v.availability==="OPEN"));assert(my.every(v=>!Object.hasOwn(v,"topic")&&!Object.hasOwn(v,"topic_snapshot")));
  const roundLink=p.locator('#my-rounds a').filter({hasText:"Mở vòng / xem biên nhận"});await roundLink.waitFor();assert.equal(await roundLink.getAttribute("href"),"/exam-demo?round="+round);await roundLink.click();await p.waitForURL(base+"/exam-demo?round="+round);assert.equal(await p.locator("#round").inputValue(),round);
  await p.locator("#email").fill(email);await p.locator("#password").fill(pass);await p.locator("#login").click();await p.waitForFunction(()=>!document.querySelector("#preflight").disabled);
  await p.locator("#preflight").click();await p.waitForFunction(()=>!document.querySelector("#start").disabled);await p.locator("#start").click();await p.waitForFunction(()=>!document.querySelector("#essay").disabled);
+ assert.equal(await p.locator("#topic").textContent(),qtopic);
+ console.log("QUESTION SNAPSHOT PASS: selected earlier question version delivered to started attempt.");
  const guardLogin=await adminCall("login",{username:"admin",password:e.VPO_TEST_ADMIN_PASSWORD},"");assert.equal(guardLogin.status,200);
  const guard=guardLogin.data.token;
  for(const op of ["suspend","delete"])assert.equal((await adminCall("change",{id:uid,op},guard)).status,409);
@@ -128,6 +147,11 @@ async function main(){
  assert.equal((await resetCall("verify",{challenge_id:nextId,code:nextMail.code,password:newPass})).status,400);
  console.log("SYNTHETIC RECOVERY PASS: generic request, cross-purpose and unverified denial, five-attempt cap, wrong/replayed code denied, browser reset, old session/password rejected.");
  // Independent expiry and stale-epoch fixtures; no real accounts or clock changes.
+ // Academic administration adds many authenticated requests to this shared service.
+ // Respect its existing 100-request/60-second global window rather than relaxing
+ // the server policy or retrying mutations after an ambiguous response.
+ console.log("Recovery edge suite: allow existing account request window to expire.");
+ await new Promise(resolve=>setTimeout(resolve,61000));
  const edgeDb=new Client({connectionString:e.VPO_CI_OWNER_DB,statement_timeout:10000,connectionTimeoutMillis:3000});
  try{
  await edgeDb.connect();const role=(await edgeDb.query("SELECT current_database() AS db,session_user AS role")).rows[0];assert.deepEqual(role,{db:"vpo_ci",role:"vpo_migrator"});
@@ -143,6 +167,12 @@ async function main(){
   const owner=(await edgeDb.query("SELECT id,auth_epoch FROM vpo_stage.users WHERE email=$1",[address])).rows[0];
   return {owner,payload:{challenge_id:cid,code,password:randomBytes(24).toString("hex")}};
  }
+ // Check immutability directly as the disposable migration owner, not via a mock API.
+ await assert.rejects(()=>edgeDb.query("UPDATE vpo_stage.question_versions SET topic='Disallowed synthetic rewrite' WHERE id=$1",[qpayload.id]),err=>err.code==="23514"&&err.message==="QUESTION_VERSION_IMMUTABLE");
+ await assert.rejects(()=>edgeDb.query("DELETE FROM vpo_stage.question_versions WHERE id=$1",[qpayload.id]),err=>err.code==="23514"&&err.message==="QUESTION_VERSION_IMMUTABLE");
+ const fixed=(await edgeDb.query("SELECT q.topic,r.topic AS round_topic,r.question_version_id FROM vpo_stage.question_versions q JOIN vpo_stage.demo_rounds r ON r.question_version_id=q.id WHERE r.id=$1",[round])).rows[0];
+ assert.equal(fixed.topic,qtopic);assert.equal(fixed.round_topic,qtopic);assert.equal(fixed.question_version_id,qpayload.id);
+ console.log("QUESTION IMMUTABILITY PASS: owner update/delete rejected, original round linkage and topic intact.");
  const expired=await fixture();
  await edgeDb.query("UPDATE vpo_stage.password_reset_challenges SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",[expired.payload.challenge_id]);
  assert.equal((await resetCall("verify",expired.payload)).status,400);
