@@ -2,9 +2,10 @@
 const http=require("node:http");
 const {Pool}=require("pg");
 const S=require("./security.cjs");
-const E=require("./exam.cjs"),P=require("./exam-policy.cjs"),W=require("./workflow-policy.cjs");
+const E=require("./exam.cjs"),P=require("./exam-policy.cjs"),W=require("./workflow-policy.cjs"),A=require("./academy-policy.cjs");
 const fs=require("node:fs"),pathLib=require("node:path");
 const demoAssets=Object.fromEntries([["/exam-demo","exam.html","text/html; charset=utf-8"],["/exam-demo.js","exam.js","text/javascript; charset=utf-8"],["/exam-demo.css","exam.css","text/css; charset=utf-8"]].map(([url,file,type])=>[url,{type,body:fs.readFileSync(pathLib.join(__dirname,"exam-client",file))}]));
+for(const [url,file,type] of [["/academy-demo","academy.html","text/html; charset=utf-8"],["/academy-demo.js","academy.js","text/javascript; charset=utf-8"],["/academy-demo.css","academy.css","text/css; charset=utf-8"]])demoAssets[url]={type,body:fs.readFileSync(pathLib.join(__dirname,"academy-client",file))};
 const c=S.config(process.env);
 const pool=new Pool({connectionString:process.env.DATABASE_URL,max:8,connectionTimeoutMillis:3000,idleTimeoutMillis:10000,statement_timeout:5000,query_timeout:6000});
 pool.on("error",()=>console.error("Database pool error"));
@@ -104,6 +105,35 @@ async function handle(req,res){
   }catch(e){
    if(e.code==="23505")throw fail(409,"ALREADY_RECORDED");
    if(e.code==="P0001"){if(e.message==="NOT_FOUND")throw fail(404,"NOT_FOUND");if(e.message==="FORBIDDEN")throw fail(403,"FORBIDDEN");throw fail(409,"WORKFLOW_REJECTED");}
+   throw e;
+  }
+ }
+
+ // V4.7 student Academy: all enrolment scope originates from authenticated session.
+ const academyMatch=/^\/me\/academy\/([^/]+)\/(portfolio|completion|submissions)$/.exec(path);
+ if((path==="/me/academy"&&req.method==="GET")||academyMatch){
+  const a=await auth(req);let op="courses",obj=null,b={};
+  if(academyMatch){
+   obj=academyMatch[1];if(!P.uuid(obj))throw fail(404,"NOT_FOUND");
+   const sub=academyMatch[2];
+   if(sub==="portfolio"&&req.method==="GET")op="portfolio";
+   else if(req.method==="POST"&&["completion","submissions"].includes(sub)){
+    requireCsrf(req,a);op=sub==="completion"?"complete":"submit";
+    b=await body(req,65536);
+    if(!(op==="complete"?A.validCompletion(b):A.validSubmission(b)))throw fail(422,"INVALID_INPUT");
+    await limit("academy:"+a.id,60);
+   }else throw fail(405,"METHOD_NOT_ALLOWED");
+  }
+  try{
+   const data=await tx(async db=>{
+    const live=await db.query("SELECT 1 FROM vpo_stage.sessions s JOIN vpo_stage.users u ON u.id=s.user_id JOIN vpo_stage.role_grants g ON g.user_id=u.id WHERE s.token_hash=$1 AND s.user_id=$2 AND s.expires_at>clock_timestamp() AND s.idle_until>clock_timestamp() AND u.status='ACTIVE' AND g.role='student' AND g.revoked_at IS NULL",[a.hash,a.id]);
+    if(!live.rowCount)throw fail(401,"UNAUTHENTICATED");
+    return (await db.query("SELECT vpo_stage.academy_student($1,$2,$3::uuid,$4::jsonb) AS value",[a.id,op,obj,JSON.stringify(b)])).rows[0].value;
+   });
+   return reply(res,op==="submit"&&!data.replayed?201:200,{mode:"synthetic-staging",data,...(op==="portfolio"?{analytics:A.analytics(data)}:{})});
+  }catch(e){
+   if(e.code==="23505")throw fail(409,"ALREADY_RECORDED");
+   if(e.code==="P0001"){if(e.message==="NOT_FOUND")throw fail(404,"NOT_FOUND");if(e.message==="FORBIDDEN")throw fail(403,"FORBIDDEN");throw fail(409,"ACADEMY_REJECTED");}
    throw e;
   }
  }
