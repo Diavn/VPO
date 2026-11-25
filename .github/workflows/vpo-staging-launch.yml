@@ -1,19 +1,19 @@
-name: VPO V6.6.1 operational finance master regression
+name: VPO V6.6.2 demo certificate master regression
 on:
   push:
-    branches: [v6.6.1-operational-finance]
+    branches: [v6.6.2-demo-certificates]
   pull_request:
-    branches: [v6.6-finance-results]
+    branches: [v6.6.1-operational-finance]
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: vpo-operational-finance
+  group: vpo-demo-certificates
   cancel-in-progress: true
 jobs:
   fresh-launch:
-    if: github.ref == 'refs/heads/v6.6.1-operational-finance' || (github.event_name == 'pull_request' && github.head_ref == 'v6.6.1-operational-finance' && github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.ref == 'refs/heads/v6.6.2-demo-certificates' || (github.event_name == 'pull_request' && github.head_ref == 'v6.6.2-demo-certificates' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
