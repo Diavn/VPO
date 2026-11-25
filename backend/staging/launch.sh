@@ -57,7 +57,7 @@ for i in $(seq 1 60); do
 done
 [[ "$(psql -XAt -v ON_ERROR_STOP=1 -c 'SELECT current_database()')" == vpo_ci ]]
 [[ "$(psql -XAt -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_namespace WHERE nspname='vpo_stage'")" == 0 ]]
-npm install --ignore-scripts --no-audit --no-fund
+npm ci --ignore-scripts --no-audit --no-fund
 declare -A pass
 roles=(vpo_migrator vpo_runtime vpo_provision vpo_accounts ci_exam_a ci_exam_b ci_moderator ci_approver ci_publisher ci_finance ci_appeal ci_cert ci_cert_approver ci_mentor_a ci_mentor_b)
 for role in "${roles[@]}"; do
