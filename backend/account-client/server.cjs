@@ -29,7 +29,7 @@ async function main(){
  const assetPath=req.method==="GET"&&typeof req.url==="string"&&req.url.length<=2048?req.url.split("?",1)[0]:null;
  if(assetPath!==null&&Object.hasOwn(assets,assetPath)){const [file,type]=assets[assetPath];return send(res,200,fs.readFileSync(path.join(__dirname,file)),type);}
  if(req.method!=="POST"){if(req.method==="GET"){const route=typeof req.url==="string"?req.url.split("?",1)[0]:"";const safe=/^\/[a-zA-Z0-9/._-]{0,100}$/.test(route)?route:"[nonstandard path redacted]";console.error("ROUTE_REJECTED",JSON.stringify({method:"GET",path:safe}));}throw fail(404,"NOT_FOUND");}
- if(req.headers.origin!==c.origin)throw fail(403,"ORIGIN");
+ if(!S.originAllowed(req.headers,c)){console.error("ORIGIN_REJECTED",S.originDiagnostic(req.headers,c));throw fail(403,"ORIGIN");}
  const now=Date.now();if(now-windowStart>=60000){windowStart=now;requests=0;for(const [k,v] of limits)if(v.until<=now)limits.delete(k);for(const [k,v] of sessions)if(v<=now)sessions.delete(k);}
  if(++requests>100)throw fail(429,"TRY_LATER");
  const b=await body(req);
