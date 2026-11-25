@@ -12,7 +12,7 @@ async function main(){
  for(const p of ["/backend/schema.sql","/.git/config","/VPO/../backend/schema.sql","/VPO/%2e%2e/backend/security.cjs","/api/admin/unknown","/api/action"])assert.equal((await fetch(base+p)).status,404);
  assert.equal((await fetch(base+"/me/rounds")).status,401);
  const bad=await fetch(base+"/api/admin/login",{method:"POST",headers:{Origin:"http://foreign.example.test","Content-Type":"application/json"},body:"{}"});assert.equal(bad.status,403);
- for(const route of ["overview","rounds","audit","round-create","enrol","content-list","content-save","content-transition","question-list","question-add","round-from-question","academy-catalog","academy-enrol"]){const denied=await fetch(base+"/api/admin/"+route,{method:"POST",headers:{Origin:base,"Content-Type":"application/json"},body:"{}"});assert.equal(denied.status,401);}
+ for(const route of ["overview","rounds","audit","round-create","enrol","content-list","content-save","content-transition","question-list","question-add","round-from-question","academy-catalog","academy-enrol","order-create","finance-summary"]){const denied=await fetch(base+"/api/admin/"+route,{method:"POST",headers:{Origin:base,"Content-Type":"application/json"},body:"{}"});assert.equal(denied.status,401);}
  async function adminCall(route,body,token){const r=await fetch(base+"/api/admin/"+route,{method:"POST",headers:{Origin:base,"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});return {status:r.status,data:await r.json()};}
  // First isolate the HTTP gateway from browser behavior, without consuming a real email.
  const probeEmail="gateway-probe-"+randomBytes(6).toString("hex")+"@example.test";
@@ -77,6 +77,25 @@ async function main(){
  assert(academicAudit.some(x=>x.action==="ROUND_CREATED"&&x.round_id===round&&x.question_version_id===qpayload.id));
  assert.equal(academicAudit.filter(x=>x.action==="ACADEMY_ENROLLED"&&x.user_id===uid&&x.course_id===course_id).length,1);
  console.log("ACADEMIC ADMIN PASS: immutable question version creation and replay, version-specific round, browser Academy enrolment, duplicate and unverified denial, audit.");
+ // A distinct finance group respects the unchanged account-service request window.
+ await new Promise(resolve=>setTimeout(resolve,61000));
+ const initialFinance=(await adminCall("finance-summary",{},adminToken)).data.data;
+ const feePayload={user_id:uid,round_id:round,amount_units:125};
+ assert.equal((await adminCall("order-create",{...feePayload,amount_units:0},adminToken)).status,422);
+ assert.equal((await adminCall("order-create",{...feePayload,state:"PAID"},adminToken)).status,422);
+ assert.equal((await adminCall("order-create",{...feePayload,user_id:fake.data.data[0].id},adminToken)).status,409);
+ await p.locator("#fee-units").fill("125");p.once("dialog",d=>d.accept());
+ const feeResponse=await postClick("#users button:text-is('Tạo đơn phí mẫu')","/api/admin/order-create",201);
+ const feeId=(await feeResponse.json()).id;
+ await p.waitForFunction(()=>document.querySelector("#finance-summary").textContent.includes("125 đơn vị mẫu")||document.querySelector("#finance-summary").textContent.includes("/125"));
+ const feeReplay=await adminCall("order-create",feePayload,adminToken);assert.equal(feeReplay.status,200);assert.equal(feeReplay.data.id,feeId);
+ assert.equal((await adminCall("order-create",{...feePayload,amount_units:126},adminToken)).status,409);
+ const summary=(await adminCall("finance-summary",{},adminToken)).data.data;
+ assert.equal(summary.totals.orders,initialFinance.totals.orders+1);assert.equal(summary.totals.unpaid,initialFinance.totals.unpaid+1);
+ assert.equal(summary.totals.total_units,initialFinance.totals.total_units+125);assert.equal(summary.totals.paid_units,initialFinance.totals.paid_units);
+ const financeAudit=(await adminCall("audit",{},adminToken)).data.data;
+ assert.equal(financeAudit.filter(x=>x.action==="ORDER_CREATED"&&x.order_id===feeId&&x.user_id===uid&&x.round_id===round).length,1);
+ console.log("OPERATIONAL FINANCE PASS: browser-created synthetic order, exact replay, amount conflict, unauthorized state override denial, aggregate totals and audit.");
  const title="DEMO bulletin "+randomBytes(4).toString("hex"),literal="<b>Plain text only</b>";
  await p.locator("#content-title").fill(title);await p.locator("#content-body").fill(literal);
  await postClick("#content-save","/api/admin/content-save",201);
@@ -99,6 +118,8 @@ async function main(){
  // Separate admin logout must not remove the student session.
  assert.equal((await ctx.request.get(base+"/me")).status(),200);
  await p.goto(base+"/staging");await p.locator("#dashboard").waitFor({state:"visible"});
+ const feeOwn=await ctx.request.get(base+"/me/orders");assert.equal(feeOwn.status(),200);assert((await feeOwn.json()).data.some(v=>v.id===feeId&&v.state==="UNPAID"&&v.amount_units===125));
+ assert.match(await p.locator("#orders").innerText(),/125 đơn vị giả định/);
  const own=await ctx.request.get(base+"/me/rounds");assert.equal(own.status(),200);const my=(await own.json()).data;assert(my.some(v=>v.id===round&&v.availability==="OPEN"));assert(my.every(v=>!Object.hasOwn(v,"topic")&&!Object.hasOwn(v,"topic_snapshot")));
  const roundLink=p.locator('#my-rounds a').filter({hasText:"Mở vòng / xem biên nhận"});await roundLink.waitFor();assert.equal(await roundLink.getAttribute("href"),"/exam-demo?round="+round);await roundLink.click();await p.waitForURL(base+"/exam-demo?round="+round);assert.equal(await p.locator("#round").inputValue(),round);
  await p.locator("#email").fill(email);await p.locator("#password").fill(pass);await p.locator("#login").click();await p.waitForFunction(()=>!document.querySelector("#preflight").disabled);
