@@ -52,7 +52,9 @@ async function handle(req,res){
  const r=await upstream(port,req.url,method,Buffer.concat(chunks),req.headers);
  if(r.status>=400&&accountAPI.has(route))console.error("ACCOUNT_UPSTREAM_STATUS",JSON.stringify({route,status:r.status}));
  const out=headers(r.headers["content-type"]||"application/octet-stream");
- for(const name of ["content-security-policy","retry-after"])if(r.headers[name])out[name]=r.headers[name];
+ // Do not append a differently-cased duplicate CSP: browsers enforce both policies.
+ if(r.headers["content-security-policy"])out["Content-Security-Policy"]=r.headers["content-security-policy"];
+ if(r.headers["retry-after"])out["Retry-After"]=r.headers["retry-after"];
  if(port===8080&&r.headers["set-cookie"])out["set-cookie"]=r.headers["set-cookie"];
  res.writeHead(r.status,out);res.end(r.body);
 }
