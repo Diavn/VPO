@@ -1,0 +1,13 @@
+# V6.6 — Finance, results and certificate status (synthetic)
+Verified base V6.5.2 exact commit a59411f334be4ac4a7d448a897de565279b526f3, Actions run 45684167898/job 139452286707: all master regression PASS, question immutability, 37-table restore, zero reported runtime npm vulnerabilities. Real Codespaces UAT still pending.
+
+## Implemented
+My VPO renders own synthetic fee orders as readable records and allows reporting a DEMO reference only when unpaid, with explicit confirmation. State transitions remain controlled by existing independent finance role and DBA-supplied synthetic statement evidence; reporting never marks a fee PAID. Published own results render score/20, sample award, rubric version, publication date, case id. Student can submit one categorical sample appeal and see its state. Existing server-side auth, CSRF, ownership, uniqueness and workflow guards remain unchanged. If network confirmation is ambiguous, refresh state before retrying; no automatic resubmission. No real currency or transfer.
+
+New /verify-demo page via gateway and student service queries existing hashed verification token endpoint. Renders VALID_DEMO, ON_HOLD, REVOKED, not found; only valid state exposes sample award, no identity, no printable official certificate. Token cleared from form after check, not stored by UI. Token still appears in API request path: production access logs require redaction. No real certificate PDF/QR or automatic student delivery. Operator provides token from existing certificate issuance workflow; not regenerated or recoverable from DB. Existing single-role staff desk remains local-only; independent finance/reviewer/certificate roles preserved, no Admin override.
+
+## Verification
+No schema changes: 37 tables, 14 migrations. Full regression retained. Extended workflow test uses browser with existing synthetic student sessions through gateway, verifies own result display and cross-account absence, reports payment, independently reconciles, refreshes PAID state, submits appeal, refreshes outcome, verifies sample certificate anonymously through browser during valid, held, restored, revoked and unknown states. Prior API negative cases and independent-role checks retained. Exact V6.6 commit CI pending at authoring.
+
+## Deferred
+Admin order generation/fee rules, independent bank statement ingestion, refund and waiver policy, staff finance UI beyond existing desk, bulk reporting, award rules, regrading, signed PDF/QR with official approval, delivery and accessibility testing. No real email/MFA, persistent deployment, production or merge. No real data. V6.5.2 remains last verified baseline until V6.6 CI succeeds. Public main untouched.
