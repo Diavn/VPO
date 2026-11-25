@@ -46,12 +46,13 @@ function requireCsrf(req,a){if(!S.eq(req.headers["x-csrf-token"],S.csrf(a.token,
 const projection="student_code,name_vi,name_latin,grade,curriculum,locale,version";
 let dummy, activeHashes=0;
 async function handle(req,res){
- if(req.headers.host!==c.host)throw fail(400,"INVALID_HOST");
+ if(!S.hostAllowed(req.headers.host,c)){console.error("HOST_REJECTED",JSON.stringify(String(req.headers.host||"").slice(0,180)));throw fail(400,"INVALID_HOST");}
  if(!["GET","POST","PATCH","PUT"].includes(req.method))throw fail(405,"METHOD_NOT_ALLOWED");
- if(req.method!=="GET"&&req.headers.origin!==c.origin)throw fail(403,"ORIGIN_REQUIRED");
+ if(req.method!=="GET"&&!S.originAllowed(req.headers,c)){console.error("ORIGIN_REJECTED",S.originDiagnostic(req.headers,c));throw fail(403,"ORIGIN_REQUIRED");}
  const path=req.url;
  if(typeof path!=="string"||!path.startsWith("/")||path.startsWith("//")||path.length>2048)throw fail(400,"INVALID_PATH");
- if(req.method==="GET"&&Object.hasOwn(demoAssets,path)){const a=demoAssets[path];res.writeHead(200,{"Content-Type":a.type,"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","X-Frame-Options":"DENY","Referrer-Policy":"no-referrer","Permissions-Policy":"camera=(), microphone=(), geolocation=()","Cross-Origin-Resource-Policy":"same-origin",...(c.secure?{"Strict-Transport-Security":"max-age=31536000"}:{}),"Content-Security-Policy":"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"});return res.end(a.body);}
+ const assetPath=req.method==="GET"?path.split("?",1)[0]:null;
+ if(assetPath!==null&&Object.hasOwn(demoAssets,assetPath)){const a=demoAssets[assetPath];res.writeHead(200,{"Content-Type":a.type,"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","X-Frame-Options":"DENY","Referrer-Policy":"no-referrer","Permissions-Policy":"camera=(), microphone=(), geolocation=()","Cross-Origin-Resource-Policy":"same-origin",...(c.secure?{"Strict-Transport-Security":"max-age=31536000"}:{}),"Content-Security-Policy":"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"});return res.end(a.body);}
  if(path==="/healthz"&&req.method==="GET"){try{await readiness();}catch{return reply(res,503,{status:"not_ready",mode:"synthetic-staging"});}return reply(res,200,{status:"ok",mode:"synthetic-staging"});}
  if(path==="/auth/login"&&req.method==="POST"){
   await limit("global",120);const b=await body(req);

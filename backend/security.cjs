@@ -13,6 +13,25 @@ const validEmail=e=>typeof e==="string"&&e.length<=120&&/^[a-z0-9][a-z0-9._+-]*@
 const csrf=(token,key)=>crypto.createHmac("sha256",key).update("csrf:"+token).digest("hex");
 const accountBucket=(email,key)=>crypto.createHmac("sha256",key).update("rate:"+email).digest("hex");
 function readToken(cookie,name){if(typeof cookie!=="string"||cookie.length>4096)return null;const hits=cookie.split(";").map(v=>v.trim()).filter(v=>v.startsWith(name+"="));if(hits.length!==1)return null;const token=hits[0].slice(name.length+1);return /^[a-f0-9]{64}$/.test(token)?token:null;}
-function config(env){if(env.VPO_MODE!=="synthetic-staging")throw Error("Synthetic staging only");const u=new URL(env.VPO_ORIGIN||"");if(u.origin!==env.VPO_ORIGIN||!(u.protocol==="https:"||(u.protocol==="http:"&&u.hostname==="localhost")))throw Error("Set an exact HTTPS origin, or http://localhost:PORT for local staging");if(!/^[a-f0-9]{64}$/i.test(env.VPO_CSRF_KEY||""))throw Error("VPO_CSRF_KEY requires 32 random bytes, hex encoded");if(!env.DATABASE_URL)throw Error("DATABASE_URL required");const port=Number(env.VPO_PORT||8080);if(!Number.isInteger(port)||port<1024||port>65535)throw Error("Invalid port");return {origin:u.origin,host:u.host,secure:u.protocol==="https:",cookie:u.protocol==="https:"?"__Host-vpo_session":"vpo_local_session",key:Buffer.from(env.VPO_CSRF_KEY,"hex"),port};}
+function config(env){if(env.VPO_MODE!=="synthetic-staging")throw Error("Synthetic staging only");const u=new URL(env.VPO_ORIGIN||"");if(u.origin!==env.VPO_ORIGIN||!(u.protocol==="https:"||(u.protocol==="http:"&&u.hostname==="localhost")))throw Error("Set an exact HTTPS origin, or http://localhost:PORT for local staging");if(!/^[a-f0-9]{64}$/i.test(env.VPO_CSRF_KEY||""))throw Error("VPO_CSRF_KEY requires 32 random bytes, hex encoded");if(!env.DATABASE_URL)throw Error("DATABASE_URL required");const port=Number(env.VPO_PORT||8080);if(!Number.isInteger(port)||port<1024||port>65535)throw Error("Invalid port");const proxyLoopback=env.VPO_CODESPACES_PROXY==="yes";
+if(proxyLoopback&&(env.CODESPACES!=="true"||!/^[a-zA-Z0-9-]+$/ .test(env.CODESPACE_NAME||"")||!/^[a-zA-Z0-9.-]+$/ .test(env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN||"")||u.origin!=="https://"+env.CODESPACE_NAME+"-"+port+"."+env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN))throw Error("Invalid Codespaces proxy configuration");
+return {proxyLoopback,origin:u.origin,host:u.host,secure:u.protocol==="https:",cookie:u.protocol==="https:"?"__Host-vpo_session":"vpo_local_session",key:Buffer.from(env.VPO_CSRF_KEY,"hex"),port};}
+// Only the exact configured public host or this service's loopback authority.
+function hostAllowed(host,c){return typeof host==="string"&&(host===c.host||(c.proxyLoopback===true&&["localhost:"+c.port,"127.0.0.1:"+c.port,"[::1]:"+c.port,"localhost","127.0.0.1","[::1]"].includes(host)));}
+// Codespaces may rewrite the browser's Origin to the local HTTP target.
+// A rewritten origin is allowed only for this configured synthetic tunnel, exact
+// same-port local authority, and browser-controlled same-origin Fetch Metadata.
+// Never trust X-Forwarded-Origin, a null/missing Origin, or cross-site requests.
+function originAllowed(headers,c){
+ if(headers.origin===c.origin)return true;
+ if(!c.proxyLoopback||!hostAllowed(headers.host,c))return false;
+ if(headers["sec-fetch-site"]!=="same-origin"||!["cors","same-origin"].includes(headers["sec-fetch-mode"])||headers["sec-fetch-dest"]!=="empty")return false;
+ return ["http://localhost:"+c.port,"http://127.0.0.1:"+c.port,"http://[::1]:"+c.port].includes(headers.origin);
+}
+function originDiagnostic(headers,c){
+ const origin=headers.origin;
+ const safe=typeof origin==="string"&&/^(https?:\/\/[a-zA-Z0-9.:[\]-]{1,180}|null)$/.test(origin)?origin:origin===undefined?"[missing]":"[redacted]";
+ return JSON.stringify({origin:safe,expected:c.origin,site:["same-origin","same-site","cross-site","none"].includes(headers["sec-fetch-site"])?headers["sec-fetch-site"]:"[missing/other]",mode:["cors","same-origin","no-cors","navigate"].includes(headers["sec-fetch-mode"])?headers["sec-fetch-mode"]:"[missing/other]",dest:headers["sec-fetch-dest"]==="empty"?"empty":"[other]"});
+}
 function profilePatch(b){if(!b||typeof b!=="object"||Array.isArray(b)||Object.keys(b).sort().join(",")!=="curriculum,grade,locale,version")return null;if(!["10","11","12"].includes(b.grade)||!["DEMO-VN","DEMO-IB","DEMO-ALEVEL"].includes(b.curriculum)||!["vi","en"].includes(b.locale)||!Number.isInteger(b.version)||b.version<1||b.version>=2147483647)return null;return b;}
-module.exports={hex,digest,eq,validPassword,hashPassword,verifyPassword,validEmail,csrf,accountBucket,readToken,config,profilePatch};
+module.exports={hex,digest,eq,validPassword,hashPassword,verifyPassword,validEmail,csrf,accountBucket,readToken,config,hostAllowed,originAllowed,originDiagnostic,profilePatch};

@@ -4,13 +4,14 @@ const assert=require("node:assert/strict"),{chromium}=require("playwright");
 const e=process.env,base="http://localhost:8080";
 if(e.VPO_MODE!=="synthetic-staging"||e.VPO_ORIGIN!==base||!(e.GITHUB_ACTIONS==="true"||e.CODESPACES==="true"))throw Error("Local staging only");
 async function main(){
- const res=await fetch(base+"/staging");assert.equal(res.status,200);assert.match(res.headers.get("content-security-policy"),/frame-ancestors 'none'/);assert.equal(res.headers.get("cache-control"),"no-store");
+ for(const route of ["/staging","/exam-demo","/academy-demo"]){const r=await fetch(base+route+"?utm_source=chatgpt.com");assert.equal(r.status,200);}
+ const res=await fetch(base+"/staging?utm_source=chatgpt.com");assert.equal(res.status,200);assert.match(res.headers.get("content-security-policy"),/frame-ancestors 'none'/);assert.equal(res.headers.get("cache-control"),"no-store");
  const browser=await chromium.launch({headless:true});
  try{
   const context=await browser.newContext({viewport:{width:390,height:844}});
   await context.route("**/*",r=>new URL(r.request().url()).origin===base?r.continue():r.abort());
   const p=await context.newPage(),errors=[];p.on("pageerror",err=>errors.push(err.message));
-  await p.goto(base+"/staging");await p.waitForFunction(()=>!document.querySelector("#login").disabled);
+  await p.goto(base+"/staging?utm_source=chatgpt.com");await p.waitForFunction(()=>!document.querySelector("#login").disabled);
   async function login(email,password){await p.locator("#email").fill(email);await p.locator("#password").fill(password);await p.locator("#login").click();await p.locator("#dashboard").waitFor({state:"visible"});assert.match(await p.locator("#profile").innerText(),/DEMO-/);return p.locator("#profile dd").first().textContent();}
   const a=await login(e.VPO_TEST_A_EMAIL,e.VPO_TEST_A_PASSWORD);
   assert.equal(await p.locator("a[href='/exam-demo']").count(),1);assert.equal(await p.locator("a[href='/academy-demo']").count(),1);

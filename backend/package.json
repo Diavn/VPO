@@ -1,6 +1,6 @@
 {
   "name": "vpo-staging-backend",
-  "version": "4.4.0",
+  "version": "6.1.5",
   "private": true,
   "type": "commonjs",
   "engines": {
