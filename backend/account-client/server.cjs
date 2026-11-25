@@ -18,7 +18,7 @@ async function hash(p){if(hashing>=2)throw fail(503,"TRY_LATER");hashing++;try{r
 function admin(req){const raw=req.headers.authorization||"";if(!/^Bearer [a-f0-9]{64}$/.test(raw))throw fail(401,"ADMIN_REQUIRED");const k=S.digest(raw.slice(7)),expiry=sessions.get(k);if(!expiry||expiry<=Date.now()){sessions.delete(k);throw fail(401,"ADMIN_REQUIRED");}return k;}
 async function begin(email){if(!S.validEmail(email))throw fail(422,"SYNTHETIC_EMAIL_REQUIRED");limit("email:"+email,3);const id=crypto.randomUUID(),code=String(crypto.randomInt(0,100000000)).padStart(8,"0");
  const r=await db.query("SELECT vpo_stage.registration_begin($1,$2,$3) AS ok",[id,email,mac(id,code)]);
- if(r.rows[0].ok){fs.writeFileSync(path.join(mailDir,id+".json"),JSON.stringify({to:email,subject:"VPO synthetic verification",code,expires_in_seconds:600}),{mode:0o600,flag:"wx"});}
+ if(r.rows[0].ok){fs.writeFileSync(path.join(mailDir,id+".json"),JSON.stringify({to:email,subject:"VPO synthetic verification",challenge_id:id,code,expires_in_seconds:600}),{mode:0o600,flag:"wx"});}
  return {challenge_id:id,message:"If eligible, verification code is sent to the synthetic mailbox.",mode:"synthetic-mailbox"};
 }
 async function main(){
