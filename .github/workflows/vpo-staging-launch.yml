@@ -1,19 +1,19 @@
-name: VPO V6.0 release readiness synthetic gate
+name: VPO V6.1 account lifecycle synthetic gate
 on:
   push:
-    branches: [v6.0-release-readiness]
+    branches: [v6.1-account-management]
   pull_request:
-    branches: [v5.8-mock-acceptance]
+    branches: [v6.0-release-readiness]
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: vpo-release-readiness
+  group: vpo-account-management
   cancel-in-progress: true
 jobs:
   fresh-launch:
-    if: github.ref == 'refs/heads/v6.0-release-readiness' || (github.event_name == 'pull_request' && github.head_ref == 'v6.0-release-readiness' && github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.ref == 'refs/heads/v6.1-account-management' || (github.event_name == 'pull_request' && github.head_ref == 'v6.1-account-management' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
