@@ -7,6 +7,10 @@
   "postCreateCommand": "sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client curl openssl",
   "remoteUser": "node",
   "portsAttributes": {
+    "5432": {
+      "label": "Disposable database",
+      "onAutoForward": "ignore"
+    },
     "8080": {
       "label": "Synthetic local API",
       "onAutoForward": "ignore"
