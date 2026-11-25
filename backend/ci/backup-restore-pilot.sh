@@ -3,7 +3,7 @@
 set -euo pipefail
 [[ ( "${GITHUB_ACTIONS:-}" == true || "${CODESPACES:-}" == true ) && "${VPO_CI_DISPOSABLE:-}" == yes ]]
 [[ "$PGHOST" == 127.0.0.1 && "$PGPORT" == 5432 && "$PGDATABASE" == vpo_ci && "$PGUSER" == postgres ]]
-for port in 8080 8081 8082; do
+for port in 8080 8081 8082 8091; do
  if (echo >/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then echo 'Refusing: application listener still active'; exit 1; fi
 done
 [[ "$(psql -XAt -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_database WHERE datname='vpo_ci_restore'")" == 0 ]]
@@ -42,6 +42,8 @@ BEGIN;
 SET LOCAL ROLE vpo_accounts;
 DO $account_acl$ BEGIN
  IF NOT has_function_privilege(current_user,'vpo_stage.registration_finish(uuid,text,text)','EXECUTE') OR NOT has_function_privilege(current_user,'vpo_stage.account_admin_change(uuid,text)','EXECUTE') THEN RAISE EXCEPTION 'Missing account routine privilege'; END IF;
+ IF NOT has_function_privilege(current_user,'vpo_stage.admin_create_round(text,timestamptz,timestamptz,integer,text)','EXECUTE') OR NOT has_function_privilege(current_user,'vpo_stage.admin_enrol(uuid,uuid)','EXECUTE') THEN RAISE EXCEPTION 'Missing admin round routine privilege'; END IF;
+ IF has_table_privilege(current_user,'vpo_stage.demo_rounds','INSERT') OR has_table_privilege(current_user,'vpo_stage.demo_enrolments','INSERT') OR has_table_privilege(current_user,'vpo_stage.account_admin_audit','DELETE') THEN RAISE EXCEPTION 'Admin direct grants invalid'; END IF;
  IF has_table_privilege(current_user,'vpo_stage.registration_challenges','SELECT') OR has_table_privilege(current_user,'vpo_stage.users','UPDATE') OR has_table_privilege(current_user,'vpo_stage.demo_drafts','SELECT') THEN RAISE EXCEPTION 'Account direct grants invalid'; END IF;
 END $account_acl$;
 ROLLBACK;
