@@ -48,7 +48,7 @@ let dummy, activeHashes=0;
 async function handle(req,res){
  if(!S.hostAllowed(req.headers.host,c)){console.error("HOST_REJECTED",JSON.stringify(String(req.headers.host||"").slice(0,180)));throw fail(400,"INVALID_HOST");}
  if(!["GET","POST","PATCH","PUT"].includes(req.method))throw fail(405,"METHOD_NOT_ALLOWED");
- if(req.method!=="GET"&&req.headers.origin!==c.origin)throw fail(403,"ORIGIN_REQUIRED");
+ if(req.method!=="GET"&&!S.originAllowed(req.headers,c)){console.error("ORIGIN_REJECTED",S.originDiagnostic(req.headers,c));throw fail(403,"ORIGIN_REQUIRED");}
  const path=req.url;
  if(typeof path!=="string"||!path.startsWith("/")||path.startsWith("//")||path.length>2048)throw fail(400,"INVALID_PATH");
  const assetPath=req.method==="GET"?path.split("?",1)[0]:null;
