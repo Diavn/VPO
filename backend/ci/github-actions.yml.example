@@ -52,10 +52,15 @@ jobs:
       - name: Install test dependencies (lockfile pending review)
         working-directory: backend
         run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Install Chromium for local browser QA
+        working-directory: backend
+        run: npx --no-install playwright install --with-deps chromium
       - name: Unit tests
         working-directory: backend
         run: npm test
       - name: Synthetic PostgreSQL and HTTP integration
+        env:
+          VPO_BROWSER_TESTS: "yes"
         run: bash backend/ci/disposable-integration.sh
       - name: Dependency vulnerability check
         working-directory: backend
