@@ -15,7 +15,7 @@ async function main(){
  const staff=await connect(e.VPO_DB_ci_exam_a);ds.push(staff);
  const mentor=await connect(e.VPO_TEST_MENTOR_DB);ds.push(mentor);
  assert.equal((await rt.query("SELECT session_user AS u")).rows[0].u,"vpo_runtime");
- const ids=(await owner.query("SELECT id,email FROM vpo_stage.users ORDER BY email")).rows;
+ const ids=(await owner.query("SELECT id,email FROM vpo_stage.users WHERE email IN ($1,$2) ORDER BY email",[e.VPO_TEST_A_EMAIL,e.VPO_TEST_B_EMAIL])).rows;
  assert.equal(ids.length,2);const [a,b]=ids;
  // DB01: profile RLS default deny and transaction-local scope; not stolen-runtime isolation.
  assert.equal((await rt.query("SELECT count(*)::int AS n FROM vpo_stage.student_profiles")).rows[0].n,0);
