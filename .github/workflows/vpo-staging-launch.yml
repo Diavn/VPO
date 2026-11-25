@@ -1,19 +1,19 @@
-name: VPO V6.4 account security master regression
+name: VPO V6.4.1 account hardening master regression
 on:
   push:
-    branches: [v6.4-account-security]
+    branches: [v6.4.1-account-hardening]
   pull_request:
-    branches: [v6.3-admin-center]
+    branches: [v6.4-account-security]
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: vpo-account-security
+  group: vpo-account-hardening
   cancel-in-progress: true
 jobs:
   fresh-launch:
-    if: github.ref == 'refs/heads/v6.4-account-security' || (github.event_name == 'pull_request' && github.head_ref == 'v6.4-account-security' && github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.ref == 'refs/heads/v6.4.1-account-hardening' || (github.event_name == 'pull_request' && github.head_ref == 'v6.4.1-account-hardening' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
