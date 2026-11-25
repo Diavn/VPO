@@ -21,11 +21,17 @@ async function begin(email){if(!S.validEmail(email))throw fail(422,"SYNTHETIC_EM
  if(r.rows[0].ok){fs.writeFileSync(path.join(mailDir,id+".json"),JSON.stringify({to:email,subject:"VPO synthetic verification",challenge_id:id,code,expires_in_seconds:600}),{mode:0o600,flag:"wx"});}
  return {challenge_id:id,message:"If eligible, verification code is sent to the synthetic mailbox.",mode:"synthetic-mailbox"};
 }
+async function readiness(){
+ const names=["registration_begin(uuid,text,text)","registration_finish(uuid,text,text)","account_admin_list(text)","account_admin_change(uuid,text)"].map(x=>"vpo_stage."+x);
+ const who=await db.query("SELECT session_user AS role,current_database() AS name,(SELECT count(*)::int FROM unnest($1::text[]) AS x(n) WHERE to_regprocedure(n) IS NULL OR NOT has_function_privilege(current_user,to_regprocedure(n),'EXECUTE')) AS missing",[names]);
+ if(who.rows[0].role!=="vpo_accounts"||who.rows[0].name!=="vpo_ci"||who.rows[0].missing!==0)throw Error("Account schema or role incomplete");
+}
 async function main(){
- const who=await db.query("SELECT session_user AS role,current_database() AS name");if(who.rows[0].role!=="vpo_accounts"||who.rows[0].name!=="vpo_ci")throw Error("Wrong role");
+ await readiness();
  const server=http.createServer({requestTimeout:10000,headersTimeout:5000,maxHeaderSize:8192},async(req,res)=>{
  try{
  if(!S.hostAllowed(req.headers.host,c)){console.error("HOST_REJECTED",JSON.stringify(String(req.headers.host||"").slice(0,180)));throw fail(421,"HOST");}
+ if(req.method==="GET"&&req.url==="/healthz"){try{await readiness();}catch{return send(res,503,{status:"not_ready",mode:"synthetic-staging"});}return send(res,200,{status:"ok",mode:"synthetic-staging"});}
  const assetPath=req.method==="GET"&&typeof req.url==="string"&&req.url.length<=2048?req.url.split("?",1)[0]:null;
  if(assetPath!==null&&Object.hasOwn(assets,assetPath)){const [file,type]=assets[assetPath];return send(res,200,fs.readFileSync(path.join(__dirname,file)),type);}
  if(req.method!=="POST"){if(req.method==="GET"){const route=typeof req.url==="string"?req.url.split("?",1)[0]:"";const safe=/^\/[a-zA-Z0-9/._-]{0,100}$/.test(route)?route:"[nonstandard path redacted]";console.error("ROUTE_REJECTED",JSON.stringify({method:"GET",path:safe}));}throw fail(404,"NOT_FOUND");}
