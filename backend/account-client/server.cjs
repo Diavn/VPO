@@ -23,7 +23,7 @@ async function begin(email,recovery=false){if(!S.validEmail(email))throw fail(42
  return {challenge_id:id,message:"If eligible, verification code is sent to the synthetic mailbox.",mode:"synthetic-mailbox"};
 }
 async function readiness(){
- const names=["registration_begin(uuid,text,text)","registration_finish(uuid,text,text)","account_admin_list(text)","account_admin_change(uuid,text)","admin_overview()","admin_rounds()","admin_create_round(uuid,text,timestamptz,timestamptz,integer,text)","password_reset_begin(uuid,text,text)","password_reset_finish(uuid,text,text)","admin_enrol(uuid,uuid)","admin_audit()","content_list(boolean)","content_save(uuid,text,text,text,integer)","content_transition(uuid,integer,text)","admin_question_list()","admin_question_add(uuid,text,integer,text)","admin_round_from_question(uuid,text,timestamptz,timestamptz,integer,uuid)","admin_academy_catalog()","admin_academy_enrol(uuid,uuid,text)"].map(x=>"vpo_stage."+x);
+ const names=["registration_begin(uuid,text,text)","registration_finish(uuid,text,text)","account_admin_list(text)","account_admin_change(uuid,text)","admin_overview()","admin_rounds()","admin_create_round(uuid,text,timestamptz,timestamptz,integer,text)","password_reset_begin(uuid,text,text)","password_reset_finish(uuid,text,text)","admin_enrol(uuid,uuid)","admin_audit()","content_list(boolean)","content_save(uuid,text,text,text,integer)","content_transition(uuid,integer,text)","admin_question_list()","admin_question_add(uuid,text,integer,text)","admin_round_from_question(uuid,text,timestamptz,timestamptz,integer,uuid)","admin_academy_catalog()","admin_academy_enrol(uuid,uuid,text)","admin_order_create(uuid,uuid,integer)","admin_finance_summary()"].map(x=>"vpo_stage."+x);
  const who=await db.query("SELECT session_user AS role,current_database() AS name,(SELECT count(*)::int FROM unnest($1::text[]) AS x(n) WHERE to_regprocedure(n) IS NULL OR NOT has_function_privilege(current_user,to_regprocedure(n),'EXECUTE')) AS missing",[names]);
  if(who.rows[0].role!=="vpo_accounts"||who.rows[0].name!=="vpo_ci"||who.rows[0].missing!==0)throw Error("Account schema or role incomplete");
 }
@@ -49,6 +49,12 @@ async function main(){
  if(req.url==="/api/reset/verify"){limit("reset-verify-global",30);if(!exact(b,"challenge_id,code,password")||!P.uuid(b.challenge_id)||typeof b.code!=="string"||!/^\d{8}$/.test(b.code)||!S.validPassword(b.password))throw fail(422,"INPUT");limit("reset:"+b.challenge_id,6);const r=await db.query("SELECT vpo_stage.password_reset_finish($1,$2,$3) AS ok",[b.challenge_id,mac(b.challenge_id,b.code),await hash(b.password)]);if(!r.rows[0].ok)throw fail(400,"RESET_REFUSED");try{mail.remove(b.challenge_id);}catch{console.error("Synthetic mailbox cleanup failed");}return send(res,200,{status:"RESET"});}
  if(req.url.startsWith("/api/admin/")){
  const k=admin(req);
+ if(req.url==="/api/admin/finance-summary"&&exact(b,""))return send(res,200,{data:(await db.query("SELECT vpo_stage.admin_finance_summary() AS data")).rows[0].data});
+ if(req.url==="/api/admin/order-create"){
+  if(!exact(b,"amount_units,round_id,user_id")||!P.uuid(b.round_id)||!P.uuid(b.user_id)||!Number.isInteger(b.amount_units)||b.amount_units<1||b.amount_units>1000000)throw fail(422,"ORDER_INPUT");
+  const r=(await db.query("SELECT vpo_stage.admin_order_create($1,$2,$3) AS data",[b.user_id,b.round_id,b.amount_units])).rows[0].data;
+  if(r.result==="INVALID")throw fail(422,"ORDER_INPUT");if(["REFUSED","CONFLICT"].includes(r.result))throw fail(409,"ORDER_REFUSED");return send(res,r.result==="CREATED"?201:200,r);
+ }
  if(req.url==="/api/admin/question-list"&&exact(b,""))return send(res,200,{data:(await db.query("SELECT vpo_stage.admin_question_list() AS data")).rows[0].data});
  if(req.url==="/api/admin/question-add"){
   if(!exact(b,"code,id,topic,version")||!P.uuid(b.id)||typeof b.code!=="string"||!/^DEMO-[A-Z0-9-]{1,60}$/.test(b.code)||!Number.isInteger(b.version)||b.version<1||b.version>1000||typeof b.topic!=="string"||!b.topic.trim()||Buffer.byteLength(b.topic)>8000)throw fail(422,"QUESTION_INPUT");
