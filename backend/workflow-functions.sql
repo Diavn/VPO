@@ -24,7 +24,7 @@ BEGIN
   ELSIF r='moderator' THEN
    SELECT coalesce(jsonb_agg(jsonb_build_object('case_id',z.id,'locked_marks',z.n)),'[]'::jsonb) INTO out FROM (SELECT k.id,count(m.assignment_id) n FROM vpo_stage.demo_marking_cases k JOIN vpo_stage.demo_marking_assignments x ON x.case_id=k.id LEFT JOIN vpo_stage.demo_marks m ON m.assignment_id=x.id LEFT JOIN vpo_stage.demo_results rr ON rr.case_id=k.id WHERE rr.case_id IS NULL GROUP BY k.id) z;
   ELSIF r IN ('approver','publisher') THEN
-   SELECT coalesce(jsonb_agg(jsonb_build_object('case_id',k.case_id,'score',k.score,'award',k.award,'state',k.state,'reason',k.reason)),'[]'::jsonb) INTO out FROM vpo_stage.demo_results k WHERE k.state=CASE r WHEN 'approver' THEN 'PROPOSED' ELSE 'APPROVED' END;
+   SELECT coalesce(jsonb_agg(jsonb_build_object('case_id',k.case_id,'score',k.score,'award',k.award,'state',k.state,'reason',k.reason,'adjudicated_scores',k.adjudicated_scores)),'[]'::jsonb) INTO out FROM vpo_stage.demo_results k WHERE k.state=CASE r WHEN 'approver' THEN 'PROPOSED' ELSE 'APPROVED' END;
   ELSIF r='finance' THEN
    SELECT coalesce(jsonb_agg(jsonb_build_object('order_id',k.id,'amount_units',k.amount_units,'transfer_ref',p.transfer_ref)),'[]'::jsonb) INTO out FROM vpo_stage.demo_orders k JOIN vpo_stage.demo_payment_reports p ON p.order_id=k.id WHERE k.state='REPORTED';
   ELSIF r='appeal_reviewer' THEN
@@ -71,7 +71,7 @@ BEGIN
    IF v_reason IS NULL OR octet_length(trim(v_reason)) NOT BETWEEN 1 AND 2000 OR award IS NULL OR award NOT IN ('NONE','FIRST','SECOND','THIRD','HONORABLE_MENTION') THEN RAISE EXCEPTION 'INVALID_PROPOSAL'; END IF;
    IF totals[2]-totals[1]>=4 THEN s:=vpo_stage.demo_score_vector(b->'adjudicated_scores'); SELECT sum(v) INTO score FROM unnest(s) v;
    ELSE IF b ? 'adjudicated_scores' THEN RAISE EXCEPTION 'NO_ADJUDICATION_NEEDED'; END IF; score:=(totals[1]+totals[2])/2.0; END IF;
-   INSERT INTO vpo_stage.demo_results(case_id,score,award,reason,moderator) VALUES(obj,score,award,v_reason,session_user);
+   INSERT INTO vpo_stage.demo_results(case_id,score,adjudicated_scores,award,reason,moderator) VALUES(obj,score,s,award,v_reason,session_user);
    out:=jsonb_build_object('state','PROPOSED','score',score,'award',award);
   ELSIF op='approve' THEN
    IF res.state IS DISTINCT FROM 'PROPOSED' OR res.moderator=session_user THEN RAISE EXCEPTION 'NOT_APPROVABLE'; END IF;
