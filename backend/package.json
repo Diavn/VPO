@@ -1,6 +1,6 @@
 {
   "name": "vpo-staging-backend",
-  "version": "6.6.1",
+  "version": "6.6.2",
   "private": true,
   "type": "commonjs",
   "engines": {
@@ -12,10 +12,13 @@
     "provision": "node provision.cjs"
   },
   "dependencies": {
-    "pg": "8.16.3"
+    "pg": "8.16.3",
+    "pdf-lib": "1.17.1",
+    "qrcode": "1.5.4"
   },
   "devDependencies": {
     "playwright": "1.56.1",
-    "axe-core": "4.10.3"
+    "axe-core": "4.10.3",
+    "jsqr": "1.4.0"
   }
 }
