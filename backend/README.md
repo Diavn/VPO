@@ -27,3 +27,6 @@ On v4.5-examination, follow [EXAMINATION.md](EXAMINATION.md) before starting: ex
 
 ## V4.6 branch note
 Follow [WORKFLOW.md](WORKFLOW.md) and [WORKFLOW_ACCEPTANCE.md](WORKFLOW_ACCEPTANCE.md) after V4.5 setup. Apply both workflow-schema.sql and workflow-functions.sql with approved synthetic roles; local-only CLI and student API. No production staff login, real bank/QR, certificate PDF or public results. Never use real student data. Current GitHub Pages main remains unchanged.
+
+## V4.7 branch note
+After V4.6 setup, follow [ACADEMY.md](ACADEMY.md) and [ACADEMY_ACCEPTANCE.md](ACADEMY_ACCEPTANCE.md). Apply academy-schema.sql then academy-functions.sql, use separate mentor roles and disposable academy fixtures. The local synthetic student Academy client is served at /academy-demo. No production release or real learner data; public GitHub Pages main remains unchanged.
