@@ -28,7 +28,7 @@ async function start(db,id,user){
  let a=(await db.query("SELECT * FROM vpo_stage.demo_attempts WHERE round_id=$1 AND user_id=$2 FOR UPDATE",[id,user])).rows[0];
  if(!a){
   if(now<r.opens_at||now>=r.closes_at)return result(409,{error:"ROUND_CLOSED"});
-  const inserted=await db.query("INSERT INTO vpo_stage.demo_attempts(round_id,user_id,started_at,deadline,topic_snapshot) SELECT id,$2,clock_timestamp(),LEAST(closes_at,clock_timestamp()+duration_seconds*interval '1 second'),topic FROM vpo_stage.demo_rounds WHERE id=$1 AND clock_timestamp()>=opens_at AND clock_timestamp()<closes_at ON CONFLICT(round_id,user_id) DO NOTHING RETURNING *",[id,user]);
+  const inserted=await db.query("INSERT INTO vpo_stage.demo_attempts(round_id,user_id,started_at,deadline,topic_snapshot) SELECT r.id,$2,t.now,LEAST(r.closes_at,t.now+r.duration_seconds*interval '1 second'),r.topic FROM vpo_stage.demo_rounds r CROSS JOIN (SELECT clock_timestamp() AS now) t WHERE r.id=$1 AND t.now>=r.opens_at AND t.now<r.closes_at ON CONFLICT(round_id,user_id) DO NOTHING RETURNING *",[id,user]);
   a=inserted.rows[0];
   if(a){await db.query("INSERT INTO vpo_stage.demo_drafts(attempt_id,seq,op_id,body,saved_at) VALUES($1,0,$2,'',$3)",[a.id,randomUUID(),a.started_at]);return result(201,publicAttempt(a,await clock(db)));}
   a=(await db.query("SELECT * FROM vpo_stage.demo_attempts WHERE round_id=$1 AND user_id=$2 FOR UPDATE",[id,user])).rows[0];
@@ -53,6 +53,7 @@ async function attempt(db,id,user,action,b){
   if(decision==="REPLAY")return result(200,{...info(),ack_seq:prior.seq,saved_at:prior.saved_at,replayed:true});
   if(decision==="OP_CONFLICT"||decision==="STALE")return result(409,{error:decision,...info()});
   if(decision==="CLOSED")return result(410,{error:"CLOSED",...info(),receipt:await receipt(db,id)});
+  if(a.latest_seq>=2000)return result(429,{error:"REVISION_LIMIT",...info()});
   const next=a.latest_seq+1;
   await db.query("INSERT INTO vpo_stage.demo_drafts(attempt_id,seq,op_id,body,saved_at) VALUES($1,$2,$3,$4,$5)",[id,next,b.op_id,b.body,now]);
   await db.query("UPDATE vpo_stage.demo_attempts SET latest_seq=$2 WHERE id=$1",[id,next]);a.latest_seq=next;
