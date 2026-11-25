@@ -16,11 +16,13 @@ for port in 5432 8080; do
  if (echo >/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then echo "Port $port occupied; refusing to touch existing services"; exit 1; fi
 done
 export VPO_MODE=synthetic-staging VPO_PORT=8080 VPO_ORIGIN=http://localhost:8080
-if [[ "$mode" == private ]]; then
- [[ "${CODESPACE_NAME:-}" =~ ^[a-zA-Z0-9-]+$ && "${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}" =~ ^[a-zA-Z0-9.-]+$ ]] || { echo 'Cannot derive exact Codespaces origin'; exit 1; }
- echo 'Before proceeding confirm Ports visibility is Private, and do NOT forward PostgreSQL (5432).'
+if [[ "$mode" != --check ]]; then
+ echo 'Use a Private port only. Do not forward PostgreSQL (5432).'
  read -r -p 'Type PRIVATE to confirm: ' confirmation
  [[ "$confirmation" == PRIVATE ]] || exit 1
+fi
+if [[ "$mode" == private ]]; then
+ [[ "${CODESPACE_NAME:-}" =~ ^[a-zA-Z0-9-]+$ && "${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}" =~ ^[a-zA-Z0-9.-]+$ ]] || { echo 'Cannot derive exact Codespaces origin'; exit 1; }
  export VPO_ORIGIN="https://${CODESPACE_NAME}-8080.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
 fi
 export VPO_CSRF_KEY="$(openssl rand -hex 32)"
@@ -39,7 +41,7 @@ cleanup(){
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-container_id="$(docker run -d --rm --name "$name" --label vpo.synthetic=staging -e POSTGRES_DB=vpo_ci -e POSTGRES_PASSWORD -p 127.0.0.1:5432:5432 postgres:16)"
+container_id="$(POSTGRES_PASSWORD="$PGPASSWORD" docker run -d --rm --name "$name" --label vpo.synthetic=staging -e POSTGRES_DB=vpo_ci -e POSTGRES_PASSWORD -p 127.0.0.1:5432:5432 postgres:16)"
 for i in $(seq 1 60); do
  if psql -XAt -v ON_ERROR_STOP=1 -c 'SELECT 1' >/dev/null 2>&1; then break; fi
  sleep 1
