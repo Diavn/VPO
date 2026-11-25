@@ -176,7 +176,7 @@ if [[ "$mode" == --check ]]; then
  VPO_TEST_ACCOUNTS_DB="$(dburl vpo_accounts)" VPO_TEST_ADMIN_HASH="$admin_hash" VPO_TEST_MAIL_KEY="$mail_key" VPO_TEST_MAIL_DIR="$mail_dir" VPO_TEST_ADMIN_PASSWORD="$admin_password" node tests/proxy-integration.cjs
  unset admin_hash mail_key admin_password
  bash ci/backup-restore-pilot.sh
- echo 'V6.5.1 master regression PASS; synthetic only; real proxy UAT and production acceptance not established.'
+ echo 'V6.5.2 master regression PASS; synthetic only; real proxy UAT and production acceptance not established.'
  exit 0
 fi
 echo '=== VPO PRIVATE STAGING / SYNTHETIC DATA ONLY ==='
