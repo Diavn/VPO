@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "mode": "synthetic-staging",
+  "production_enabled": false,
+  "baseline": {
+    "commit": "7a52ae93fdfbe53f992c68c98ced545af89a7b59",
+    "run": "https://github.com/Diavn/VPO/actions/runs/45610131932",
+    "scope": "V5.8 synthetic CI PASS; not human acceptance"
+  },
+  "gates": [
+    {
+      "gate": "G0",
+      "area": "Governance",
+      "requirement": "Approved scope, contest rules, scoring and concurrency N",
+      "status": "PENDING",
+      "evidence": "BTC decision and versioned policy",
+      "approval": null
+    },
+    {
+      "gate": "G1",
+      "area": "Privacy and registration",
+      "requirement": "Consent/guardian flow, retention/deletion, privacy notice and real registration eligibility",
+      "status": "PENDING",
+      "evidence": "Legal/privacy review and acceptance evidence",
+      "approval": null
+    },
+    {
+      "gate": "G1",
+      "area": "Staff identity",
+      "requirement": "Individual verified staff accounts, MFA, onboarding/revocation and role separation",
+      "status": "PENDING",
+      "evidence": "Independent auth audit; synthetic desk is not MFA",
+      "approval": null
+    },
+    {
+      "gate": "G2",
+      "area": "Staging and UAT",
+      "requirement": "Private HTTPS browser UAT, independent human roles, production-equivalent staging",
+      "status": "PARTIAL",
+      "evidence": "V5.7 CI and user-provided launcher output; browser human acceptance missing",
+      "approval": null
+    },
+    {
+      "gate": "G2",
+      "area": "Functional scope",
+      "requirement": "Registration/evidence, fee/waiver/refund, appeal/regrade, certificate delivery, administration UI",
+      "status": "PARTIAL",
+      "evidence": "V5.8 synthetic workflow; real scope incomplete",
+      "approval": null
+    },
+    {
+      "gate": "G3",
+      "area": "Performance",
+      "requirement": "Approved N, 1.5N spike, sustained autosave, real network and deadline backlog",
+      "status": "PARTIAL",
+      "evidence": "V5.5 only 24-user pilot",
+      "approval": null
+    },
+    {
+      "gate": "G3",
+      "area": "Recovery",
+      "requirement": "Independent infrastructure encrypted backup, cross-host restore, agreed RPO/RTO",
+      "status": "PARTIAL",
+      "evidence": "V5.5 same-cluster logical restore only",
+      "approval": null
+    },
+    {
+      "gate": "G3",
+      "area": "Security",
+      "requirement": "Independent review, applicable ASVS, reproducible dependencies, SBOM, no unresolved high/critical findings",
+      "status": "PARTIAL",
+      "evidence": "V5.6 synthetic security CI; no independent audit",
+      "approval": null
+    },
+    {
+      "gate": "G3",
+      "area": "Accessibility",
+      "requirement": "Manual accessibility/device checks and user feedback",
+      "status": "PARTIAL",
+      "evidence": "V5.4 automated Chromium only",
+      "approval": null
+    },
+    {
+      "gate": "G4",
+      "area": "Operations",
+      "requirement": "Production hosting/TLS/secrets/monitoring/incident response, rollback and signed launch",
+      "status": "PENDING",
+      "evidence": "No production environment authorized",
+      "approval": null
+    },
+    {
+      "gate": "G5",
+      "area": "Post-exam",
+      "requirement": "Integrity review, final grading/publication and lessons learned",
+      "status": "NOT_APPLICABLE_YET",
+      "evidence": "Post-event signoff only after authorized real event",
+      "approval": null
+    }
+  ]
+}
