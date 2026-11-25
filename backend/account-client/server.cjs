@@ -6,7 +6,7 @@ if(!(e.CODESPACES==="true"||e.GITHUB_ACTIONS==="true")||!/^s1:[a-f0-9]{32}:[a-f0
 const url=new URL(e.DATABASE_URL);if(url.hostname!=="127.0.0.1"||url.port!=="5432"||url.username!=="vpo_accounts"||url.pathname!=="/vpo_ci"||url.protocol!=="postgresql:"||url.search||url.hash)throw Error("Disposable DB only");
 if(!fs.statSync(mailDir).isDirectory()||(fs.statSync(mailDir).mode&0o077)!==0)throw Error("Private synthetic mailbox required");
 const db=new Pool({connectionString:e.DATABASE_URL,max:4,statement_timeout:5000,connectionTimeoutMillis:3000});
-const assets={"/admin":["admin.html","text/html"],"/register":["register.html","text/html"],"/accounts.js":["accounts.js","text/javascript"],"/accounts.css":["accounts.css","text/css"]};
+const assets={"/":["admin.html","text/html"],"/admin/":["admin.html","text/html"],"/register/":["register.html","text/html"],"/admin":["admin.html","text/html"],"/register":["register.html","text/html"],"/accounts.js":["accounts.js","text/javascript"],"/accounts.css":["accounts.css","text/css"]};
 const sessions=new Map(),limits=new Map();let hashing=0,requests=0,windowStart=Date.now();
 const fail=(status,code)=>Object.assign(Error(code),{status,code});
 const exact=(b,keys)=>b&&typeof b==="object"&&!Array.isArray(b)&&Object.keys(b).sort().join(",")===keys;
@@ -28,7 +28,7 @@ async function main(){
  if(!S.hostAllowed(req.headers.host,c)){console.error("HOST_REJECTED",JSON.stringify(String(req.headers.host||"").slice(0,180)));throw fail(421,"HOST");}
  const assetPath=req.method==="GET"&&typeof req.url==="string"&&req.url.length<=2048?req.url.split("?",1)[0]:null;
  if(assetPath!==null&&Object.hasOwn(assets,assetPath)){const [file,type]=assets[assetPath];return send(res,200,fs.readFileSync(path.join(__dirname,file)),type);}
- if(req.method!=="POST")throw fail(404,"NOT_FOUND");
+ if(req.method!=="POST"){if(req.method==="GET"){const route=typeof req.url==="string"?req.url.split("?",1)[0]:"";const safe=/^\/[a-zA-Z0-9/._-]{0,100}$/.test(route)?route:"[nonstandard path redacted]";console.error("ROUTE_REJECTED",JSON.stringify({method:"GET",path:safe}));}throw fail(404,"NOT_FOUND");}
  if(req.headers.origin!==c.origin)throw fail(403,"ORIGIN");
  const now=Date.now();if(now-windowStart>=60000){windowStart=now;requests=0;for(const [k,v] of limits)if(v.until<=now)limits.delete(k);for(const [k,v] of sessions)if(v<=now)sessions.delete(k);}
  if(++requests>100)throw fail(429,"TRY_LATER");
