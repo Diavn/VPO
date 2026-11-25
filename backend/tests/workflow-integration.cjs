@@ -1,7 +1,7 @@
 "use strict";
 const assert=require("node:assert/strict"),{Client}=require("pg");
 const e=process.env,base=e.VPO_ORIGIN,cid=e.VPO_CI_CASE,oid=e.VPO_CI_ORDER;
-if(e.GITHUB_ACTIONS!=="true"||e.VPO_CI_DISPOSABLE!=="yes"||e.VPO_MODE!=="synthetic-staging"||base!=="http://localhost:8080")throw Error("CI disposable fixture required");
+if((e.GITHUB_ACTIONS!=="true"&&e.CODESPACES!=="true")||e.VPO_CI_DISPOSABLE!=="yes"||e.VPO_MODE!=="synthetic-staging"||base!=="http://localhost:8080")throw Error("CI disposable fixture required");
 const roles=["ci_exam_a","ci_exam_b","ci_moderator","ci_approver","ci_publisher","ci_finance","ci_appeal","ci_cert","ci_cert_approver"];
 const db={};
 async function staff(role,op,id=null,b={}){return (await db[role].query("SELECT vpo_stage.demo_staff_action($1,$2::uuid,$3::jsonb) AS value",[op,id,JSON.stringify(b)])).rows[0].value;}
