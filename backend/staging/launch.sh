@@ -101,8 +101,21 @@ if [[ "$mode" == --check ]]; then
  node tests/staging-integration.cjs
  node tests/integration-smoke.cjs
  node tests/exam-integration.cjs
+ # Only the first synthetic round has a submitted attempt at this point.
+ attempt="$(owner -At -c "SELECT s.attempt_id FROM vpo_stage.demo_submissions s JOIN vpo_stage.demo_attempts a ON a.id=s.attempt_id WHERE a.round_id='$VPO_TEST_ROUND'::uuid")"
+ [[ "$attempt" =~ ^[a-f0-9-]{36}$ ]]
+ owner -q -v attempt_id="$attempt" -v examiner_a=ci_exam_a -v examiner_b=ci_exam_b -f workflow-fixture.sql >/dev/null
+ export VPO_CI_CASE="$(owner -At -c 'SELECT id FROM vpo_stage.demo_marking_cases')"
+ export VPO_CI_ORDER="$(owner -At -c 'SELECT id FROM vpo_stage.demo_orders')"
+ export VPO_CI_TRANSFER="$(owner -At -c 'SELECT transfer_ref FROM vpo_stage.demo_statement_lines')"
+ export VPO_CI_DISPOSABLE=yes VPO_CI_OWNER_DB="$(dburl vpo_migrator)"
+ for role in ci_exam_a ci_exam_b ci_moderator ci_approver ci_publisher ci_finance ci_appeal ci_cert ci_cert_approver; do
+  key="VPO_DB_$role"; export "$key=$(dburl "$role")"
+ done
+ node tests/workflow-integration.cjs
  node tests/academy-integration.cjs
- echo 'V5.7 fresh launch smoke PASS; not production acceptance.'
+ node tests/mock-deadline.cjs
+ echo 'V5.8 full synthetic mock PASS; human UAT and production acceptance not established.'
  exit 0
 fi
 echo '=== VPO PRIVATE STAGING / SYNTHETIC DATA ONLY ==='
@@ -110,4 +123,28 @@ printf 'Dashboard: %s/staging\nExam: %s/exam-demo\nAcademy: %s/academy-demo\n' "
 printf 'A (enrolled): %s\nPassword A: %s\nB (not enrolled): %s\nPassword B: %s\nRound UUID: %s\n' "$VPO_TEST_A_EMAIL" "$VPO_TEST_A_PASSWORD" "$VPO_TEST_B_EMAIL" "$VPO_TEST_B_PASSWORD" "$VPO_TEST_ROUND"
 echo 'Passwords are generated for this run only. Do not share terminal screenshots or real data.'
 echo 'Keep the port Private. Ctrl+C stops this instance and deletes its disposable database.'
-wait "$server_pid"
+# Optional owner-operated synthetic staff console. One human may simulate roles;
+# role-separated DB credentials stay in this process; no independent human sign-off.
+echo 'Operator commands: seed | staff ROLE OP [UUID] | quit'
+echo 'For staff mutations, enter JSON on the next line (or {} for no arguments).'
+while kill -0 "$server_pid" 2>/dev/null; do
+ read -r -p 'VPO mock> ' cmd role action obj extra || break
+ case "$cmd" in
+ quit) break;;
+ seed)
+  [[ -z "$role$action$obj$extra" ]] || { echo 'Usage: seed'; continue; }
+  attempt="$(owner -At -v round="$VPO_TEST_ROUND" -v email="$VPO_TEST_A_EMAIL" <<'SQL'
+SELECT s.attempt_id FROM vpo_stage.demo_submissions s JOIN vpo_stage.demo_attempts a ON a.id=s.attempt_id JOIN vpo_stage.users u ON u.id=a.user_id WHERE a.round_id=:'round'::uuid AND u.email=:'email';
+SQL
+)"
+  [[ "$attempt" =~ ^[a-f0-9-]{36}$ ]] || { echo 'Submit A’s mock essay first.'; continue; }
+  if ! owner -q -v attempt_id="$attempt" -v examiner_a=ci_exam_a -v examiner_b=ci_exam_b -f workflow-fixture.sql; then echo 'Fixture already exists or could not be seeded.'; fi;;
+ staff)
+  [[ -z "$extra" ]] || { echo 'Usage: staff ROLE OP [UUID]'; continue; }
+  case "$role" in ci_exam_a|ci_exam_b|ci_moderator|ci_approver|ci_publisher|ci_finance|ci_appeal|ci_cert|ci_cert_approver) ;; *) echo 'Unknown role'; continue;; esac
+  read -r -p 'JSON payload: ' payload || break
+  args=("$action"); [[ -z "$obj" ]] || args+=("$obj")
+  printf '%s\n' "$payload" | env -u PGPASSWORD -u VPO_TEST_A_PASSWORD -u VPO_TEST_B_PASSWORD DATABASE_URL="$(dburl "$role")" node workflow-cli.cjs "${args[@]}" || echo 'Operation refused (check role/state/input).';;
+ *) echo 'Commands: seed | staff ROLE OP [UUID] | quit';;
+ esac
+done
