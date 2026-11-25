@@ -3,7 +3,9 @@
 set -euo pipefail
 [[ ( "${GITHUB_ACTIONS:-}" == true || "${CODESPACES:-}" == true ) && "${VPO_CI_DISPOSABLE:-}" == yes ]]
 [[ "$PGHOST" == 127.0.0.1 && "$PGPORT" == 5432 && "$PGDATABASE" == vpo_ci && "$PGUSER" == postgres ]]
-if curl --noproxy '*' -fsS http://localhost:8080/healthz >/dev/null 2>&1; then echo 'Refusing: backend still active'; exit 1; fi
+for port in 8080 8081 8082; do
+ if (echo >/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then echo 'Refusing: application listener still active'; exit 1; fi
+done
 [[ "$(psql -XAt -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_database WHERE datname='vpo_ci_restore'")" == 0 ]]
 umask 077
 tmp="$(mktemp -d)"
@@ -18,7 +20,7 @@ SQL
 }
 start="$(date +%s)"
 snapshot vpo_ci > "$tmp/before"
-[[ "$(wc -l < "$tmp/before" | tr -d ' ')" == 32 ]]
+[[ "$(wc -l < "$tmp/before" | tr -d ' ')" == 34 ]]
 pg_dump --format=custom --schema=vpo_stage --file="$tmp/stage.dump" vpo_ci
 createdb -T template0 vpo_ci_restore
 created=yes
@@ -36,6 +38,13 @@ DO $$ BEGIN
  IF NOT has_function_privilege(current_user,'vpo_stage.lock_student_session(text,uuid)','EXECUTE') THEN RAISE EXCEPTION 'Missing session routine privilege'; END IF;
 END $$;
 ROLLBACK;
+BEGIN;
+SET LOCAL ROLE vpo_accounts;
+DO $ BEGIN
+ IF NOT has_function_privilege(current_user,'vpo_stage.registration_finish(uuid,text,text)','EXECUTE') OR NOT has_function_privilege(current_user,'vpo_stage.account_admin_change(uuid,text)','EXECUTE') THEN RAISE EXCEPTION 'Missing account routine privilege'; END IF;
+ IF has_table_privilege(current_user,'vpo_stage.registration_challenges','SELECT') OR has_table_privilege(current_user,'vpo_stage.users','UPDATE') OR has_table_privilege(current_user,'vpo_stage.demo_drafts','SELECT') THEN RAISE EXCEPTION 'Account direct grants invalid'; END IF;
+END $;
+ROLLBACK;
 SQL
-echo "RESTORE PASS: all 32 table row counts/content digests match, sampled ACL/RLS preserved; elapsed $(( $(date +%s)-start )) seconds."
+echo "RESTORE PASS: all 34 table row counts/content digests match, sampled ACL/RLS preserved; elapsed $(( $(date +%s)-start )) seconds."
 echo 'Offline same-cluster logical restore only; not PITR, disaster recovery or production RTO/RPO evidence.'
