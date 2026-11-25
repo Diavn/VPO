@@ -9,8 +9,8 @@ if(!c.secure&&c.origin!=="http://localhost:8091")throw Error("Exact local origin
 function upstreamOrigin(port){return c.secure?"https://"+e.CODESPACE_NAME+"-"+port+"."+e.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:"http://localhost:"+port;}
 const root=path.resolve(__dirname,"../.."),pages=["index","about","competition","results","knowledge","library","academy","community","news","support"];
 const files=new Set([...pages.map(x=>x+".html"),"styles.css","app.js","portal.css","portal.js","brand/vpo-mark.svg","brand/vpo-horizontal.svg","brand/vpo-horizontal-dark.svg"]);
-const accountPages=new Set(["/admin","/admin/","/register","/register/","/reset","/accounts.css","/accounts.js"]);
-const accountAPI=new Set(["/api/admin/login","/api/admin/logout","/api/admin/users","/api/admin/invite","/api/admin/change","/api/admin/overview","/api/admin/rounds","/api/admin/audit","/api/admin/round-create","/api/admin/enrol","/api/register/request","/api/register/verify","/api/reset/request","/api/reset/verify"]);
+const accountPages=new Set(["/admin","/admin/","/register","/register/","/reset","/bulletin","/bulletin.js","/accounts.css","/accounts.js"]);
+const accountAPI=new Set(["/api/admin/login","/api/admin/logout","/api/admin/users","/api/admin/invite","/api/admin/change","/api/admin/overview","/api/admin/rounds","/api/admin/audit","/api/admin/round-create","/api/admin/enrol","/api/admin/content-list","/api/admin/content-save","/api/admin/content-transition","/api/register/request","/api/register/verify","/api/reset/request","/api/reset/verify"]);
 const studentPages=new Set(["/staging","/staging.css","/staging.js","/exam-demo","/exam-demo.css","/exam-demo.js","/academy-demo","/academy-demo.css","/academy-demo.js"]);
 const uuid="[a-fA-F0-9-]{36}";
 const studentAPI=[/^\/auth\/(login|logout)$/,/^\/me(?:\/profile|\/orders|\/results|\/academy|\/rounds)?$/,new RegExp("^/rounds/"+uuid+"/(preflight|attempts)$"),new RegExp("^/attempts/"+uuid+"(?:/(topics|draft|submit|receipt|events))?$"),new RegExp("^/me/orders/"+uuid+"/report$"),new RegExp("^/me/results/"+uuid+"/appeal$"),new RegExp("^/me/academy/"+uuid+"/(portfolio|completion|submissions)$"),/^\/public\/certificates\/[a-f0-9]{64}$/];
@@ -38,11 +38,11 @@ async function handle(req,res){
  if(method==="GET"&&route==="/healthz"){try{const r=await Promise.all([8080,8082].map(p=>upstream(p,"/healthz","GET",Buffer.alloc(0),{})));return reply(res,r.every(x=>x.status===200)?200:503,{mode:"synthetic-staging",student:r[0].status,accounts:r[1].status});}catch{return reply(res,503,{error:"UPSTREAM_UNAVAILABLE"});}}
  if(method==="GET"&&route.startsWith("/VPO/")&&files.has(route.slice(5))){
   const file=route.slice(5);let b=fs.readFileSync(path.join(root,file));
-  if(file.endsWith(".html"))b=Buffer.from(b.toString("utf8").replace("</header>",'</header><nav class="wrap actions" aria-label="Private staging services"><a href="/staging">Student Dashboard</a> <a href="/register">Register / Đăng ký mẫu</a> <a href="/admin">Admin</a></nav>'));
+  if(file.endsWith(".html"))b=Buffer.from(b.toString("utf8").replace("</header>",'</header><nav class="wrap actions" aria-label="Private staging services"><a href="/staging">Student Dashboard</a> <a href="/register">Register / Đăng ký mẫu</a> <a href="/admin">Admin</a> <a href="/bulletin">Bản tin mẫu / Bulletin</a></nav>'));
   res.writeHead(200,headers(mime[path.extname(file)]));return res.end(b);
  }
  let port=0;
- if(method==="GET"&&accountPages.has(route))port=8082;
+ if(method==="GET"&&(accountPages.has(route)||req.url==="/api/public/content"))port=8082;
  else if(method==="GET"&&studentPages.has(route))port=8080;
  else if(req.url===route&&accountAPI.has(route)&&method==="POST")port=8082;
  else if(req.url===route&&studentAPI.some(r=>r.test(route)))port=8080;
