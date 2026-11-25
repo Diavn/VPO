@@ -1,9 +1,11 @@
 "use strict";
 const $=id=>document.getElementById(id);
 let busy=false;
+function clearSlip(){$("slip").hidden=true;$("slip").removeAttribute("href");}
+const scanned=location.hash.slice(1);if(scanned){history.replaceState(null,"",location.pathname+location.search);if(/^[a-f0-9]{64}$/.test(scanned))$("token").value=scanned;}
 $("verify-form").addEventListener("submit",async e=>{
  e.preventDefault();if(busy)return;const token=$("token").value.trim();
- $("verification").hidden=true;$("verification-data").replaceChildren();
+ clearSlip();$("verification").hidden=true;$("verification-data").replaceChildren();
  if(!/^[a-f0-9]{64}$/.test(token)){$("verify-status").textContent="Mã xác minh mẫu không hợp lệ.";return;}
  busy=true;$("verify").disabled=true;$("verify-status").textContent="Đang kiểm tra...";
  try{
@@ -15,6 +17,7 @@ $("verify-form").addEventListener("submit",async e=>{
   const awards={NONE:"Không có giải",FIRST:"Giải Nhất",SECOND:"Giải Nhì",THIRD:"Giải Ba",HONORABLE_MENTION:"Khuyến khích"};
   const add=(key,value)=>{const dt=document.createElement("dt"),dd=document.createElement("dd");dt.textContent=key;dd.textContent=value;$("verification-data").append(dt,dd);};
   add("Trạng thái",states[v.status]);if(v.status==="VALID_DEMO"&&v.award)add("Giải mẫu",awards[v.award]||v.award);add("Thời điểm cấp",new Date(v.issued_at).toLocaleString("vi-VN"));
+  if(v.status==="VALID_DEMO"){$("slip").href="/public/certificates/"+token+"/document.pdf";$("slip").hidden=false;}
   $("verification").hidden=false;$("verify-status").textContent="Đã kiểm tra trạng thái mẫu.";
  }catch{$("verify-status").textContent="Không xác minh được. Làm mới để thử lại.";}
  finally{$("token").value="";busy=false;$("verify").disabled=false;}
