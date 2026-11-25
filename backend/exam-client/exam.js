@@ -16,9 +16,10 @@ function showReceipt(r){el("receipt-output").hidden=false;set("receipt-output",J
 async function run(fn){if(busy)return;busy=true;controls();try{await fn();}catch(e){set("save-status","Chưa xác nhận: "+e.message+". Giữ trang mở và thử lại.");}finally{busy=false;controls();}}
 async function recover(force=false){
  if((dirty()||pending)&&!force&&!confirm("Đọc lại sẽ thay thế phần chưa xác nhận. Hãy sao chép phần cần giữ trước. Tiếp tục?"))return;
- const d=expect(await api("/attempts/"+attempt+"/draft"));update(d);seq=d.draft.seq;acked=d.draft.body;pending=null;conflict=false;el("essay").value=acked;count();
- if(!closed){const t=expect(await api("/attempts/"+attempt+"/topics"));update(t);set("topic",t.topic);}else{set("topic","Phiên đã chốt.");}
- set("save-status","Đã đọc bản máy chủ #"+seq+".");
+ conflict=true;controls();
+ const d=expect(await api("/attempts/"+attempt+"/draft"));update(d);seq=d.draft.seq;acked=d.draft.body;pending=null;el("essay").value=acked;count();
+ if(!closed){const t=expect(await api("/attempts/"+attempt+"/topics"));update(t);set("topic",closed?"Phiên đã chốt.":t.topic);}else{set("topic","Phiên đã chốt.");}
+ conflict=false;set("save-status","Đã đọc bản máy chủ #"+seq+".");controls();
 }
 el("login").addEventListener("click",()=>run(async()=>{
  const email=el("email").value.trim();if(!/^[a-z0-9][a-z0-9._+-]*@example\.test$/.test(email))throw Error("Chỉ dùng tài khoản @example.test");
