@@ -32,8 +32,10 @@ if [[ "${GITHUB_ACTIONS:-}" == true ]]; then echo "::add-mask::$PGPASSWORD"; ech
 name="vpo-staging-$(openssl rand -hex 8)"
 tmp="$(mktemp -d)"
 server_pid=""
+desk_pid=""
 container_id=""
 cleanup(){
+ if [[ -n "$desk_pid" ]]; then kill "$desk_pid" 2>/dev/null || true; wait "$desk_pid" 2>/dev/null || true; fi
  if [[ -n "$server_pid" ]]; then kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true; fi
  if [[ -n "$container_id" ]]; then docker stop "$container_id" >/dev/null 2>&1 || true; fi
  rm -rf "$tmp"
@@ -125,12 +127,33 @@ echo 'Passwords are generated for this run only. Do not share terminal screensho
 echo 'Keep the port Private. Ctrl+C stops this instance and deletes its disposable database.'
 # Optional owner-operated synthetic staff console. One human may simulate roles;
 # role-separated DB credentials stay in this process; no independent human sign-off.
-echo 'Operator commands: seed | staff ROLE OP [UUID] | quit'
+echo 'Operator commands: seed | staff ROLE OP [UUID] | desk ROLE | desk-stop | quit'
 echo 'For staff mutations, enter JSON on the next line (or {} for no arguments).'
 while kill -0 "$server_pid" 2>/dev/null; do
  read -r -p 'VPO mock> ' cmd role action obj extra || break
  case "$cmd" in
  quit) break;;
+ desk-stop)
+  if [[ -n "$desk_pid" ]]; then kill "$desk_pid" 2>/dev/null || true; wait "$desk_pid" 2>/dev/null || true; desk_pid=""; fi;;
+ desk)
+  [[ "$mode" == local ]] || { echo "Staff desk requires local mode and private desktop port forwarding (8081)."; continue; }
+  [[ -z "$action$obj$extra" ]] || { echo "Usage: desk ROLE"; continue; }
+  case "$role" in ci_exam_a|ci_exam_b|ci_moderator|ci_approver|ci_publisher|ci_finance|ci_appeal|ci_cert|ci_cert_approver) ;; *) echo "Unknown role"; continue;; esac
+  if [[ -n "$desk_pid" ]]; then echo "Stop current desk first: desk-stop"; continue; fi
+  if (echo >/dev/tcp/127.0.0.1/8081) 2>/dev/null; then echo "Port 8081 occupied"; continue; fi
+  read -r -p "Confirm private desktop forwarding only; type LOCAL: " desk_confirm
+  [[ "$desk_confirm" == LOCAL ]] || continue
+  desk_key="$(openssl rand -hex 32)"
+  env -i PATH="$PATH" CODESPACES=true VPO_MODE=synthetic-staging VPO_DESK_ROLE="$role" VPO_DESK_KEY="$desk_key" DATABASE_URL="$(dburl "$role")" node staff-desk/server.cjs >"$tmp/desk.log" 2>&1 &
+  desk_pid=$!
+  ready=no
+  for i in $(seq 1 20); do
+   if curl --noproxy "*" -fsS http://localhost:8081/ >/dev/null 2>&1; then ready=yes; break; fi
+   kill -0 "$desk_pid" 2>/dev/null || break
+   sleep 1
+  done
+  if [[ "$ready" == yes ]] && kill -0 "$desk_pid" 2>/dev/null; then printf "Staff desk: http://localhost:8081/\nOne-run access key: %s\n" "$desk_key"; else echo "Desk startup failed"; kill "$desk_pid" 2>/dev/null || true; wait "$desk_pid" 2>/dev/null || true; desk_pid=""; fi
+  unset desk_key;;
  seed)
   [[ -z "$role$action$obj$extra" ]] || { echo 'Usage: seed'; continue; }
   attempt="$(owner -At -v round="$VPO_TEST_ROUND" -v email="$VPO_TEST_A_EMAIL" <<'SQL'
@@ -145,6 +168,6 @@ SQL
   read -r -p 'JSON payload: ' payload || break
   args=("$action"); [[ -z "$obj" ]] || args+=("$obj")
   printf '%s\n' "$payload" | env -u PGPASSWORD -u VPO_TEST_A_PASSWORD -u VPO_TEST_B_PASSWORD DATABASE_URL="$(dburl "$role")" node workflow-cli.cjs "${args[@]}" || echo 'Operation refused (check role/state/input).';;
- *) echo 'Commands: seed | staff ROLE OP [UUID] | quit';;
+ *) echo 'Commands: seed | staff ROLE OP [UUID] | desk ROLE | desk-stop | quit';;
  esac
 done
