@@ -96,7 +96,17 @@ async function main(){
  assert.equal((await resetCall("verify",resetPayload)).status,400);
  assert.equal((await fetch(base+"/me",{headers:{Cookie:prior}})).status,401);assert.equal((await studentLogin(pass)).status,401);assert.equal((await studentLogin(newPass)).status,200);
  assert(!fs.existsSync(path.join(e.VPO_TEST_MAIL_DIR,resetId+".json")));
- console.log("SYNTHETIC RECOVERY PASS: generic request, wrong/replayed code denied, browser reset, old session/password rejected.");
+ // Explicit negative cases on synthetic accounts only.
+ const unverified=await resetCall("request",{email:e.VPO_TEST_B_EMAIL});assert.equal(unverified.status,202);assert(!fs.existsSync(path.join(e.VPO_TEST_MAIL_DIR,unverified.data.challenge_id+".json")));
+ assert.deepEqual(Object.keys(unknown.data).sort(),Object.keys(request.data).sort());
+ const registrationMail=JSON.parse(fs.readFileSync(path.join(e.VPO_TEST_MAIL_DIR,probeResult.challenge_id+".json"),"utf8"));
+ assert.equal((await resetCall("verify",{challenge_id:probeResult.challenge_id,code:registrationMail.code,password:newPass})).status,400);
+ const next=await resetCall("request",{email});assert.equal(next.status,202);
+ const nextId=next.data.challenge_id,nextMail=JSON.parse(fs.readFileSync(path.join(e.VPO_TEST_MAIL_DIR,nextId+".json"),"utf8"));
+ const wrong=nextMail.code==="00000000"?"11111111":"00000000";
+ for(let i=0;i<5;i++)assert.equal((await resetCall("verify",{challenge_id:nextId,code:wrong,password:newPass})).status,400);
+ assert.equal((await resetCall("verify",{challenge_id:nextId,code:nextMail.code,password:newPass})).status,400);
+ console.log("SYNTHETIC RECOVERY PASS: generic request, cross-purpose and unverified denial, five-attempt cap, wrong/replayed code denied, browser reset, old session/password rejected.");
  assert.deepEqual(errors,[]);
  console.log("UNIFIED PORTAL PASS: ten public pages, My VPO navigation, browser OTP registration, student login, admin search/logout, separated student session, blocked unknown paths/origin.");
  }finally{await b.close();}
