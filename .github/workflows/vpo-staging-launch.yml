@@ -41,7 +41,7 @@ jobs:
       - name: Install browser test dependencies
         working-directory: backend
         run: |
-          npm install --ignore-scripts --no-audit --no-fund
+          npm ci --ignore-scripts --no-audit --no-fund
           npx --no-install playwright install --with-deps chromium
       - name: All unit and public portal tests
         run: |
@@ -52,22 +52,13 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends poppler-utils
           node backend/tests/rendered-certificate.cjs
-      - name: Record public npm lockfile candidate
+      - name: Verify locked dependencies and generate SBOM
         working-directory: backend
         run: |
-          node - <<'NODE'
-          const fs=require("node:fs"),crypto=require("node:crypto"),assert=require("node:assert/strict");
-          const file=fs.readFileSync("package-lock.json","utf8"),lock=JSON.parse(file);
-          assert.equal(lock.lockfileVersion,3);
-          for(const [name,p] of Object.entries(lock.packages)){
-            if(!name)continue;
-            assert(typeof p.resolved==="string"&&p.resolved.startsWith("https://registry.npmjs.org/"));
-            assert(typeof p.integrity==="string"&&/^sha(512|1)-[A-Za-z0-9+/=]+$/.test(p.integrity));
-          }
-          console.log("VPO_LOCKFILE_SHA256 "+crypto.createHash("sha256").update(file).digest("hex"));
-          for(let i=0;i<file.length;i+=1500)console.log("VPO_LOCKFILE_PART "+(i/1500)+" "+JSON.stringify(file.slice(i,i+1500)));
-          console.log("VPO_LOCKFILE_END "+Math.ceil(file.length/1500));
-          NODE
+          echo 'c70a7cb1c891e8057b344bfe9fa0c55db26efad305bbce1c612238c092e8765a  package-lock.json' | sha256sum -c -
+          npm sbom --sbom-format cyclonedx --omit=dev > "$RUNNER_TEMP/vpo-runtime-sbom.json"
+          node -e 'const s=require(process.env.RUNNER_TEMP+"/vpo-runtime-sbom.json");if(s.bomFormat!=="CycloneDX"||!s.components?.length)process.exit(1);console.log("SBOM PASS: "+s.components.length+" runtime components")'
+          git diff --exit-code -- package.json package-lock.json
       - name: Launch full master regression
         run: bash backend/staging/launch.sh --check
       - name: Dependency vulnerability check (runtime)
