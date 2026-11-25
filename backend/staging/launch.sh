@@ -75,11 +75,11 @@ GRANT CREATE ON DATABASE vpo_ci TO vpo_migrator;
 SQL
 dburl(){ printf 'postgresql://%s:%s@127.0.0.1:5432/vpo_ci' "$1" "${pass[$1]}"; }
 owner(){ PGUSER=vpo_migrator PGPASSWORD="${pass[vpo_migrator]}" psql -X -v ON_ERROR_STOP=1 "$@"; }
-for migration in schema.sql grants.sql exam-schema.sql workflow-schema.sql workflow-functions.sql academy-schema.sql academy-functions.sql integrity.sql security-hardening.sql account-management.sql admin-center.sql account-security.sql; do
+for migration in schema.sql grants.sql exam-schema.sql workflow-schema.sql workflow-functions.sql academy-schema.sql academy-functions.sql integrity.sql security-hardening.sql account-management.sql admin-center.sql account-security.sql content-management.sql; do
  echo "Applying $migration"
  owner -q -f "$migration"
 done
-[[ "$(owner -At -c "SELECT count(*) FROM pg_tables WHERE schemaname='vpo_stage'")" == 35 ]] || { echo "Unexpected schema table count"; exit 1; }
+[[ "$(owner -At -c "SELECT count(*) FROM pg_tables WHERE schemaname='vpo_stage'")" == 36 ]] || { echo "Unexpected schema table count"; exit 1; }
 owner -q <<'SQL'
 INSERT INTO vpo_stage.demo_staff(login_name,role) VALUES
  ('ci_exam_a','examiner'),('ci_exam_b','examiner'),('ci_moderator','moderator'),('ci_approver','approver'),('ci_publisher','publisher'),('ci_finance','finance'),('ci_appeal','appeal_reviewer'),('ci_cert','cert_officer'),('ci_cert_approver','cert_approver');
@@ -176,7 +176,7 @@ if [[ "$mode" == --check ]]; then
  VPO_TEST_ACCOUNTS_DB="$(dburl vpo_accounts)" VPO_TEST_ADMIN_HASH="$admin_hash" VPO_TEST_MAIL_KEY="$mail_key" VPO_TEST_MAIL_DIR="$mail_dir" VPO_TEST_ADMIN_PASSWORD="$admin_password" node tests/proxy-integration.cjs
  unset admin_hash mail_key admin_password
  bash ci/backup-restore-pilot.sh
- echo 'V6.4 master regression PASS; synthetic only; real proxy UAT and production acceptance not established.'
+ echo 'V6.5 master regression PASS; synthetic only; real proxy UAT and production acceptance not established.'
  exit 0
 fi
 echo '=== VPO PRIVATE STAGING / SYNTHETIC DATA ONLY ==='
