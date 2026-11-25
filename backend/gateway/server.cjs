@@ -9,8 +9,8 @@ if(!c.secure&&c.origin!=="http://localhost:8091")throw Error("Exact local origin
 function upstreamOrigin(port){return c.secure?"https://"+e.CODESPACE_NAME+"-"+port+"."+e.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:"http://localhost:"+port;}
 const root=path.resolve(__dirname,"../.."),pages=["index","about","competition","results","knowledge","library","academy","community","news","support"];
 const files=new Set([...pages.map(x=>x+".html"),"styles.css","app.js","portal.css","portal.js","brand/vpo-mark.svg","brand/vpo-horizontal.svg","brand/vpo-horizontal-dark.svg"]);
-const accountPages=new Set(["/admin","/admin/","/register","/register/","/accounts.css","/accounts.js"]);
-const accountAPI=new Set(["/api/admin/login","/api/admin/logout","/api/admin/users","/api/admin/invite","/api/admin/change","/api/admin/overview","/api/admin/rounds","/api/admin/audit","/api/admin/round-create","/api/admin/enrol","/api/register/request","/api/register/verify"]);
+const accountPages=new Set(["/admin","/admin/","/register","/register/","/reset","/accounts.css","/accounts.js"]);
+const accountAPI=new Set(["/api/admin/login","/api/admin/logout","/api/admin/users","/api/admin/invite","/api/admin/change","/api/admin/overview","/api/admin/rounds","/api/admin/audit","/api/admin/round-create","/api/admin/enrol","/api/register/request","/api/register/verify","/api/reset/request","/api/reset/verify"]);
 const studentPages=new Set(["/staging","/staging.css","/staging.js","/exam-demo","/exam-demo.css","/exam-demo.js","/academy-demo","/academy-demo.css","/academy-demo.js"]);
 const uuid="[a-fA-F0-9-]{36}";
 const studentAPI=[/^\/auth\/(login|logout)$/,/^\/me(?:\/profile|\/orders|\/results|\/academy)?$/,new RegExp("^/rounds/"+uuid+"/(preflight|attempts)$"),new RegExp("^/attempts/"+uuid+"(?:/(topics|draft|submit|receipt|events))?$"),new RegExp("^/me/orders/"+uuid+"/report$"),new RegExp("^/me/results/"+uuid+"/appeal$"),new RegExp("^/me/academy/"+uuid+"/(portfolio|completion|submissions)$"),/^\/public\/certificates\/[a-f0-9]{64}$/];
