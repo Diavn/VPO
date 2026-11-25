@@ -107,6 +107,39 @@ async function main(){
  for(let i=0;i<5;i++)assert.equal((await resetCall("verify",{challenge_id:nextId,code:wrong,password:newPass})).status,400);
  assert.equal((await resetCall("verify",{challenge_id:nextId,code:nextMail.code,password:newPass})).status,400);
  console.log("SYNTHETIC RECOVERY PASS: generic request, cross-purpose and unverified denial, five-attempt cap, wrong/replayed code denied, browser reset, old session/password rejected.");
+ // Independent expiry and stale-epoch fixtures; no real accounts or clock changes.
+ const edgeDb=new Client({connectionString:e.VPO_CI_OWNER_DB,statement_timeout:10000,connectionTimeoutMillis:3000});
+ try{
+ await edgeDb.connect();const role=(await edgeDb.query("SELECT current_database() AS db,session_user AS role")).rows[0];assert.deepEqual(role,{db:"vpo_ci",role:"vpo_migrator"});
+ // Use distinct verified fixture users, so per-email request limits are not relaxed.
+ async function fixture(){
+  const address="recovery-edge-"+randomBytes(6).toString("hex")+"@example.test",password=randomBytes(24).toString("hex");
+  const response=await fetch(base+"/api/register/request",{method:"POST",headers:{Origin:base,"Content-Type":"application/json"},body:JSON.stringify({email:address})});
+  assert.equal(response.status,202);const id=(await response.json()).challenge_id;
+  const mail=JSON.parse(fs.readFileSync(path.join(e.VPO_TEST_MAIL_DIR,id+".json"),"utf8"));
+  const verified=await fetch(base+"/api/register/verify",{method:"POST",headers:{Origin:base,"Content-Type":"application/json"},body:JSON.stringify({challenge_id:id,code:mail.code,password})});assert.equal(verified.status,201);
+  const req=await resetCall("request",{email:address});assert.equal(req.status,202);
+  const cid=req.data.challenge_id,code=JSON.parse(fs.readFileSync(path.join(e.VPO_TEST_MAIL_DIR,cid+".json"),"utf8")).code;
+  const owner=(await edgeDb.query("SELECT id,auth_epoch FROM vpo_stage.users WHERE email=$1",[address])).rows[0];
+  return {owner,payload:{challenge_id:cid,code,password:randomBytes(24).toString("hex")}};
+ }
+ const expired=await fixture();
+ await edgeDb.query("UPDATE vpo_stage.password_reset_challenges SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",[expired.payload.challenge_id]);
+ assert.equal((await resetCall("verify",expired.payload)).status,400);
+ const changed=await fixture();
+ await edgeDb.query("UPDATE vpo_stage.users SET status='SUSPENDED' WHERE id=$1",[changed.owner.id]);
+ await edgeDb.query("UPDATE vpo_stage.users SET status='ACTIVE' WHERE id=$1",[changed.owner.id]);
+ assert.equal((await resetCall("verify",changed.payload)).status,400);
+ const revoked=await fixture();
+ await edgeDb.query("UPDATE vpo_stage.role_grants SET revoked_at=clock_timestamp() WHERE user_id=$1 AND role='student'",[revoked.owner.id]);
+ await edgeDb.query("UPDATE vpo_stage.role_grants SET revoked_at=NULL WHERE user_id=$1 AND role='student'",[revoked.owner.id]);
+ assert.equal((await resetCall("verify",revoked.payload)).status,400);
+ for(const item of [expired,changed,revoked]){
+  const audit=(await edgeDb.query("SELECT count(*)::int AS n FROM vpo_stage.account_admin_audit WHERE action='PASSWORD_RESET' AND user_id=$1",[item.owner.id])).rows[0];
+  assert.equal(audit.n,0);
+ }
+ console.log("RECOVERY EDGE PASS: expired OTP, changed user epoch and changed grant epoch denied; no reset audit created.");
+ }finally{await edgeDb.end();}
  assert.deepEqual(errors,[]);
  console.log("UNIFIED PORTAL PASS: ten public pages, My VPO navigation, browser OTP registration, student login, admin search/logout, separated student session, blocked unknown paths/origin.");
  }finally{await b.close();}
