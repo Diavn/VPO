@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Isolated CI service only. Backend must already be stopped; no real backups.
 set -euo pipefail
-[[ ( "GITHUB_ACTIONS" == true || "CODESPACES" == true ) && "VPO_CI_DISPOSABLE" == yes ]]
+[[ ( "${GITHUB_ACTIONS:-}" == true || "${CODESPACES:-}" == true ) && "${VPO_CI_DISPOSABLE:-}" == yes ]]
 [[ "$PGHOST" == 127.0.0.1 && "$PGPORT" == 5432 && "$PGDATABASE" == vpo_ci && "$PGUSER" == postgres ]]
 if curl --noproxy '*' -fsS http://localhost:8080/healthz >/dev/null 2>&1; then echo 'Refusing: backend still active'; exit 1; fi
 [[ "$(psql -XAt -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_database WHERE datname='vpo_ci_restore'")" == 0 ]]
