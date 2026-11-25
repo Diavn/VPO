@@ -24,3 +24,6 @@ After installing dependencies and starting local staging, provision two fake acc
 
 ## V4.5 branch note
 On v4.5-examination, follow [EXAMINATION.md](EXAMINATION.md) before starting: exam-schema.sql is required and the synthetic local client is served at /exam-demo. The V4.4-only startup steps above are insufficient on this branch. Do not merge into GitHub Pages or expose the staging service publicly.
+
+## V4.6 branch note
+Follow [WORKFLOW.md](WORKFLOW.md) and [WORKFLOW_ACCEPTANCE.md](WORKFLOW_ACCEPTANCE.md) after V4.5 setup. Apply both workflow-schema.sql and workflow-functions.sql with approved synthetic roles; local-only CLI and student API. No production staff login, real bank/QR, certificate PDF or public results. Never use real student data. Current GitHub Pages main remains unchanged.
