@@ -15,7 +15,8 @@ async function main(){
  const server=http.createServer({requestTimeout:10000,headersTimeout:5000,maxHeaderSize:8192},async(req,res)=>{
   try{
    if(req.headers.host!=="localhost:8081")return answer(res,421,{error:"HOST"});
-   if(req.method==="GET"&&Object.hasOwn(assets,req.url)){const [file,type]=assets[req.url];return answer(res,200,fs.readFileSync(path.join(__dirname,file)),type);}
+   const assetPath=req.method==="GET"&&typeof req.url==="string"&&req.url.length<=2048?req.url.split("?",1)[0]:null;
+   if(assetPath!==null&&Object.hasOwn(assets,assetPath)){const [file,type]=assets[assetPath];return answer(res,200,fs.readFileSync(path.join(__dirname,file)),type);}
    if(req.method!=="POST"||req.url!=="/api/action")return answer(res,404,{error:"NOT_FOUND"});
    if(req.headers.origin!==origin)return answer(res,403,{error:"ORIGIN"});
    if(Date.now()-windowStart>=60000){windowStart=Date.now();hits=0;}if(++hits>120)return answer(res,429,{error:"RATE"});
