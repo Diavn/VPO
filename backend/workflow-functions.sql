@@ -13,7 +13,7 @@ CREATE FUNCTION vpo_stage.demo_staff_action(op text, obj uuid, b jsonb DEFAULT '
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,vpo_stage AS $$
 DECLARE r text; cid uuid; a vpo_stage.demo_marking_assignments%ROWTYPE; res vpo_stage.demo_results%ROWTYPE;
  o vpo_stage.demo_orders%ROWTYPE; c vpo_stage.demo_certificates%ROWTYPE; ap vpo_stage.demo_appeals%ROWTYPE;
- s smallint[]; totals integer[]; score numeric(4,1); reason text; award text; token text; out jsonb; ref text;
+ s smallint[]; totals integer[]; score numeric(4,1); v_reason text; award text; token text; out jsonb; ref text;
 BEGIN
  SELECT role INTO r FROM vpo_stage.demo_staff WHERE login_name=session_user;
  IF r IS NULL THEN RAISE EXCEPTION 'FORBIDDEN'; END IF;
@@ -50,9 +50,9 @@ BEGIN
    INSERT INTO vpo_stage.demo_workflow_audit(actor,action,object_id) VALUES(session_user,op,obj); RETURN out;
   END IF;
   IF EXISTS(SELECT 1 FROM vpo_stage.demo_results WHERE case_id=a.case_id) THEN RAISE EXCEPTION 'CASE_LOCKED'; END IF;
-  s:=vpo_stage.demo_score_vector(b->'scores'); reason:=b->>'reason';
-  IF reason IS NULL OR octet_length(trim(reason)) NOT BETWEEN 1 AND 2000 THEN RAISE EXCEPTION 'REASON_REQUIRED'; END IF;
-  INSERT INTO vpo_stage.demo_marks(assignment_id,scores,rationale) VALUES(obj,s,reason);
+  s:=vpo_stage.demo_score_vector(b->'scores'); v_reason:=b->>'reason';
+  IF v_reason IS NULL OR octet_length(trim(v_reason)) NOT BETWEEN 1 AND 2000 THEN RAISE EXCEPTION 'REASON_REQUIRED'; END IF;
+  INSERT INTO vpo_stage.demo_marks(assignment_id,scores,rationale) VALUES(obj,s,v_reason);
   out:=jsonb_build_object('locked',true,'assignment_id',obj);
  ELSIF op IN ('moderation_detail','propose','approve','publish','appeal_decide','cert_issue') THEN
   IF (op IN ('moderation_detail','propose') AND r<>'moderator') OR (op='approve' AND r<>'approver') OR (op='publish' AND r<>'publisher') OR (op='appeal_decide' AND r<>'appeal_reviewer') OR (op='cert_issue' AND r<>'cert_officer') THEN RAISE EXCEPTION 'FORBIDDEN'; END IF;
@@ -67,11 +67,11 @@ BEGIN
     INSERT INTO vpo_stage.demo_workflow_audit(actor,action,object_id) VALUES(session_user,op,obj); RETURN out;
    END IF;
    IF res.case_id IS NOT NULL OR coalesce(cardinality(totals),0)<>2 OR (SELECT count(*) FROM vpo_stage.demo_marking_assignments WHERE case_id=obj)<>2 THEN RAISE EXCEPTION 'TWO_LOCKED_MARKS_REQUIRED'; END IF;
-   reason:=b->>'reason'; award:=b->>'award';
-   IF reason IS NULL OR octet_length(trim(reason)) NOT BETWEEN 1 AND 2000 OR award IS NULL OR award NOT IN ('NONE','FIRST','SECOND','THIRD','HONORABLE_MENTION') THEN RAISE EXCEPTION 'INVALID_PROPOSAL'; END IF;
+   v_reason:=b->>'reason'; award:=b->>'award';
+   IF v_reason IS NULL OR octet_length(trim(v_reason)) NOT BETWEEN 1 AND 2000 OR award IS NULL OR award NOT IN ('NONE','FIRST','SECOND','THIRD','HONORABLE_MENTION') THEN RAISE EXCEPTION 'INVALID_PROPOSAL'; END IF;
    IF totals[2]-totals[1]>=4 THEN s:=vpo_stage.demo_score_vector(b->'adjudicated_scores'); SELECT sum(v) INTO score FROM unnest(s) v;
    ELSE IF b ? 'adjudicated_scores' THEN RAISE EXCEPTION 'NO_ADJUDICATION_NEEDED'; END IF; score:=(totals[1]+totals[2])/2.0; END IF;
-   INSERT INTO vpo_stage.demo_results(case_id,score,award,reason,moderator) VALUES(obj,score,award,reason,session_user);
+   INSERT INTO vpo_stage.demo_results(case_id,score,award,reason,moderator) VALUES(obj,score,award,v_reason,session_user);
    out:=jsonb_build_object('state','PROPOSED','score',score,'award',award);
   ELSIF op='approve' THEN
    IF res.state IS DISTINCT FROM 'PROPOSED' OR res.moderator=session_user THEN RAISE EXCEPTION 'NOT_APPROVABLE'; END IF;
@@ -83,9 +83,9 @@ BEGIN
    out:=jsonb_build_object('state','PUBLISHED','visibility','STUDENT_ONLY_DEMO');
   ELSIF op='appeal_decide' THEN
    SELECT * INTO ap FROM vpo_stage.demo_appeals WHERE case_id=obj;
-   reason:=b->>'reason';
-   IF ap.state IS DISTINCT FROM 'OPEN' OR res.moderator=session_user OR res.approver=session_user OR res.publisher=session_user OR reason IS NULL OR octet_length(trim(reason)) NOT BETWEEN 1 AND 2000 OR coalesce(b->>'decision','') NOT IN ('DISMISSED','REVIEW_REQUIRED') THEN RAISE EXCEPTION 'INVALID_APPEAL_DECISION'; END IF;
-   UPDATE vpo_stage.demo_appeals SET state=b->>'decision',reviewer=session_user,reason=demo_staff_action.reason WHERE case_id=obj;
+   v_reason:=b->>'reason';
+   IF ap.state IS DISTINCT FROM 'OPEN' OR res.moderator=session_user OR res.approver=session_user OR res.publisher=session_user OR v_reason IS NULL OR octet_length(trim(v_reason)) NOT BETWEEN 1 AND 2000 OR coalesce(b->>'decision','') NOT IN ('DISMISSED','REVIEW_REQUIRED') THEN RAISE EXCEPTION 'INVALID_APPEAL_DECISION'; END IF;
+   UPDATE vpo_stage.demo_appeals SET state=b->>'decision',reviewer=session_user,reason=v_reason WHERE case_id=obj;
    out:=jsonb_build_object('appeal_state',b->>'decision','score_changed',false);
   ELSE
    IF res.state IS DISTINCT FROM 'PUBLISHED' OR res.award='NONE' OR EXISTS(SELECT 1 FROM vpo_stage.demo_appeals WHERE case_id=obj AND state IN ('OPEN','REVIEW_REQUIRED')) THEN RAISE EXCEPTION 'CERTIFICATE_NOT_ALLOWED'; END IF;
@@ -107,9 +107,9 @@ BEGIN
   SELECT * INTO c FROM vpo_stage.demo_certificates WHERE id=obj FOR UPDATE;
   IF NOT FOUND OR c.revoked_at IS NOT NULL THEN RAISE EXCEPTION 'NOT_FOUND_OR_REVOKED'; END IF;
   IF op='cert_revoke_request' THEN
-   reason:=b->>'reason';
-   IF c.revoke_requested_by IS NOT NULL OR reason IS NULL OR octet_length(trim(reason)) NOT BETWEEN 1 AND 2000 THEN RAISE EXCEPTION 'INVALID_REQUEST'; END IF;
-   UPDATE vpo_stage.demo_certificates SET revoke_requested_by=session_user,revoke_reason=demo_staff_action.reason WHERE id=obj;
+   v_reason:=b->>'reason';
+   IF c.revoke_requested_by IS NOT NULL OR v_reason IS NULL OR octet_length(trim(v_reason)) NOT BETWEEN 1 AND 2000 THEN RAISE EXCEPTION 'INVALID_REQUEST'; END IF;
+   UPDATE vpo_stage.demo_certificates SET revoke_requested_by=session_user,revoke_reason=v_reason WHERE id=obj;
    out:=jsonb_build_object('state','REVOCATION_PENDING');
   ELSE
    IF c.revoke_requested_by IS NULL OR c.revoke_requested_by=session_user THEN RAISE EXCEPTION 'INDEPENDENT_APPROVAL_REQUIRED'; END IF;
