@@ -3,9 +3,9 @@
   "mode": "synthetic-staging",
   "production_enabled": false,
   "baseline": {
-    "commit": "7a52ae93fdfbe53f992c68c98ced545af89a7b59",
-    "run": "https://github.com/Diavn/VPO/actions/runs/45610131932",
-    "scope": "V5.8 synthetic CI PASS; not human acceptance"
+    "commit": "03e62328a2fe5c47283cd1cff62a2af403c9260b",
+    "run": "https://github.com/Diavn/VPO/actions/runs/45689815859",
+    "scope": "V6.6.1 complete synthetic CI PASS; not human acceptance"
   },
   "gates": [
     {
@@ -37,7 +37,7 @@
       "area": "Staging and UAT",
       "requirement": "Private HTTPS browser UAT, independent human roles, production-equivalent staging",
       "status": "PARTIAL",
-      "evidence": "V5.7 CI and user-provided launcher output; browser human acceptance missing",
+      "evidence": "V6.6.1 unified browser and simulated proxy PASS; actual private Codespaces and independent human UAT pending",
       "approval": null
     },
     {
@@ -45,7 +45,7 @@
       "area": "Functional scope",
       "requirement": "Registration/evidence, fee/waiver/refund, appeal/regrade, certificate delivery, administration UI",
       "status": "PARTIAL",
-      "evidence": "V5.8 synthetic workflow; real scope incomplete",
+      "evidence": "V6.6.1 synthetic registration, exam, administration, CMS, Academy, finance/results/appeal and certificate status PASS. V6.6.2 PDF/QR component PASS in run 45693910546, full regression failed; actual scope incomplete",
       "approval": null
     },
     {
@@ -53,7 +53,7 @@
       "area": "Performance",
       "requirement": "Approved N, 1.5N spike, sustained autosave, real network and deadline backlog",
       "status": "PARTIAL",
-      "evidence": "V5.5 only 24-user pilot",
+      "evidence": "V6.6.1 24-user pilot, 96 acknowledged drafts, 24 retries and 24 unique receipts; sequential login; official N and spike testing pending",
       "approval": null
     },
     {
@@ -61,7 +61,7 @@
       "area": "Recovery",
       "requirement": "Independent infrastructure encrypted backup, cross-host restore, agreed RPO/RTO",
       "status": "PARTIAL",
-      "evidence": "V5.5 same-cluster logical restore only",
+      "evidence": "V6.6.1 same-cluster logical restore 37 tables with matching digests and sampled ACL/RLS; independent cross-host restore pending",
       "approval": null
     },
     {
@@ -69,7 +69,7 @@
       "area": "Security",
       "requirement": "Independent review, applicable ASVS, reproducible dependencies, SBOM, no unresolved high/critical findings",
       "status": "PARTIAL",
-      "evidence": "V5.6 synthetic security CI; no independent audit",
+      "evidence": "V6.6.1 SEC01–08 and runtime npm audit PASS in synthetic CI; candidate lockfile committed and npm ci/SBOM configured, exact candidate CI pending; independent audit pending",
       "approval": null
     },
     {
@@ -77,7 +77,7 @@
       "area": "Accessibility",
       "requirement": "Manual accessibility/device checks and user feedback",
       "status": "PARTIAL",
-      "evidence": "V5.4 automated Chromium only",
+      "evidence": "V6.6.1 Chromium automated checks, 88 public viewport/language loads and axe at 390/1440; manual device and screen-reader checks pending",
       "approval": null
     },
     {
