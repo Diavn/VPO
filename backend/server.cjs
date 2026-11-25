@@ -12,10 +12,15 @@ pool.on("error",()=>console.error("Database pool error"));
 const q=(sql,p=[])=>pool.query(sql,p);
 // V5.0: object-presence check only, not a substitute for migration or authorization tests.
 const expectedTables=["vpo_stage.users","vpo_stage.role_grants","vpo_stage.student_profiles","vpo_stage.sessions","vpo_stage.login_limits","vpo_stage.audit_events","vpo_stage.demo_rounds","vpo_stage.demo_enrolments","vpo_stage.demo_attempts","vpo_stage.demo_drafts","vpo_stage.demo_submissions","vpo_stage.demo_events","vpo_stage.demo_staff","vpo_stage.demo_marking_cases","vpo_stage.demo_marking_assignments","vpo_stage.demo_marks","vpo_stage.demo_results","vpo_stage.demo_appeals","vpo_stage.demo_orders","vpo_stage.demo_payment_reports","vpo_stage.demo_statement_lines","vpo_stage.demo_reconciliations","vpo_stage.demo_certificates","vpo_stage.demo_workflow_audit","vpo_stage.academy_courses","vpo_stage.academy_lessons","vpo_stage.academy_tasks","vpo_stage.academy_mentors","vpo_stage.academy_enrolments","vpo_stage.academy_completion","vpo_stage.academy_submissions","vpo_stage.academy_feedback"];
-const expectedRoutines=["vpo_stage.demo_score_vector(jsonb)","vpo_stage.demo_staff_action(text,uuid,jsonb)","vpo_stage.demo_student_action(uuid,text,uuid,jsonb)","vpo_stage.demo_verify_certificate(text)","vpo_stage.academy_student(uuid,text,uuid,jsonb)","vpo_stage.academy_mentor(text,uuid,jsonb)"];
+const expectedRoutines=["vpo_stage.demo_score_vector(jsonb)","vpo_stage.demo_staff_action(text,uuid,jsonb)","vpo_stage.demo_student_action(uuid,text,uuid,jsonb)","vpo_stage.demo_verify_certificate(text)","vpo_stage.academy_student(uuid,text,uuid,jsonb)","vpo_stage.academy_mentor(text,uuid,jsonb)","vpo_stage.lock_student_session(text,uuid)"];
 async function readiness(){
  const r=await q("SELECT current_user::text AS role, session_user::text AS login, (SELECT count(*)::int FROM unnest($1::text[]) AS x(n) WHERE to_regclass(n) IS NULL) AS missing_tables, (SELECT count(*)::int FROM unnest($2::text[]) AS x(n) WHERE to_regprocedure(n) IS NULL) AS missing_routines",[expectedTables,expectedRoutines]);
  const v=r.rows[0];if(v.role!=="vpo_runtime"||v.login!=="vpo_runtime"||v.missing_tables!==0||v.missing_routines!==0)throw Error("Synthetic runtime role or schema incomplete");
+}
+async function lockSession(db,a){
+ const r=await db.query("SELECT vpo_stage.lock_student_session($1,$2) AS live",[a.hash,a.id]);
+ if(!r.rows[0].live)throw fail(401,"UNAUTHENTICATED");
+ await db.query("SELECT set_config('vpo.student_id',$1,true)",[a.id]);
 }
 const fail=(status,code)=>Object.assign(Error(code),{status,code});
 function cookie(token,clear=false){return c.cookie+"="+(clear?"":token)+"; Path=/; HttpOnly; SameSite=Strict; Max-Age="+(clear?"0":"28800")+(c.secure?"; Secure":"");}
@@ -48,14 +53,14 @@ async function handle(req,res){
   return reply(res,200,{role:"student",csrf:S.csrf(token,c.key),mode:"synthetic-staging"},{"Set-Cookie":cookie(token)});
  }
  if(path==="/me"&&req.method==="GET"){
-  const a=await auth(req);const r=await q("SELECT "+projection+" FROM vpo_stage.student_profiles WHERE user_id=$1",[a.id]);if(!r.rowCount)throw fail(404,"PROFILE_NOT_FOUND");
+  const a=await auth(req);const r=await tx(async db=>{await lockSession(db,a);return db.query("SELECT "+projection+" FROM vpo_stage.student_profiles WHERE user_id=$1",[a.id]);});if(!r.rowCount)throw fail(404,"PROFILE_NOT_FOUND");
   return reply(res,200,{role:"student",profile:r.rows[0],csrf:S.csrf(a.token,c.key),mode:"synthetic-staging"});
  }
  if(path==="/me/profile"&&req.method==="PATCH"){
   const a=await auth(req);requireCsrf(req,a);const b=S.profilePatch(await body(req));if(!b)throw fail(422,"INVALID_PROFILE");
-  const profile=await tx(async db=>{const r=await db.query("UPDATE vpo_stage.student_profiles SET grade=$1,curriculum=$2,locale=$3,version=version+1 WHERE user_id=$4 AND version=$5 AND EXISTS(SELECT 1 FROM vpo_stage.role_grants g JOIN vpo_stage.users u ON u.id=g.user_id WHERE g.user_id=$4 AND g.role='student' AND g.revoked_at IS NULL AND u.status='ACTIVE') RETURNING "+projection,[b.grade,b.curriculum,b.locale,a.id,b.version]);if(!r.rowCount)throw fail(409,"STALE_OR_UNAVAILABLE");await db.query("INSERT INTO vpo_stage.audit_events(user_id,event) VALUES($1,'PROFILE_UPDATE')",[a.id]);return r.rows[0];});return reply(res,200,{profile});
+  const profile=await tx(async db=>{await lockSession(db,a);const r=await db.query("UPDATE vpo_stage.student_profiles SET grade=$1,curriculum=$2,locale=$3,version=version+1 WHERE user_id=$4 AND version=$5 AND EXISTS(SELECT 1 FROM vpo_stage.role_grants g JOIN vpo_stage.users u ON u.id=g.user_id WHERE g.user_id=$4 AND g.role='student' AND g.revoked_at IS NULL AND u.status='ACTIVE') RETURNING "+projection,[b.grade,b.curriculum,b.locale,a.id,b.version]);if(!r.rowCount)throw fail(409,"STALE_OR_UNAVAILABLE");await db.query("INSERT INTO vpo_stage.audit_events(user_id,event) VALUES($1,'PROFILE_UPDATE')",[a.id]);return r.rows[0];});return reply(res,200,{profile});
  }
- if(path==="/auth/logout"&&req.method==="POST"){const a=await auth(req);requireCsrf(req,a);await tx(async db=>{await db.query("DELETE FROM vpo_stage.sessions WHERE token_hash=$1 AND user_id=$2",[a.hash,a.id]);await db.query("INSERT INTO vpo_stage.audit_events(user_id,event) VALUES($1,'LOGOUT')",[a.id]);});return reply(res,200,{ok:true},{"Set-Cookie":cookie("",true)});}
+ if(path==="/auth/logout"&&req.method==="POST"){const a=await auth(req);requireCsrf(req,a);await tx(async db=>{await lockSession(db,a);await db.query("DELETE FROM vpo_stage.sessions WHERE token_hash=$1 AND user_id=$2",[a.hash,a.id]);await db.query("INSERT INTO vpo_stage.audit_events(user_id,event) VALUES($1,'LOGOUT')",[a.id]);});return reply(res,200,{ok:true},{"Set-Cookie":cookie("",true)});}
 
  const rm=/^\/rounds\/([^/]+)\/(preflight|attempts)$/.exec(path);
  const am=/^\/attempts\/([^/]+)(?:\/(topics|draft|submit|receipt|events))?$/.exec(path);
@@ -74,8 +79,7 @@ async function handle(req,res){
   if(!operation)throw fail(405,"METHOD_NOT_ALLOWED");
   if(req.method!=="GET")await limit("exam:"+a.id,600);
   const out=await tx(async db=>{
-   const live=await db.query("SELECT 1 FROM vpo_stage.sessions s JOIN vpo_stage.users u ON u.id=s.user_id JOIN vpo_stage.role_grants g ON g.user_id=u.id WHERE s.token_hash=$1 AND s.user_id=$2 AND s.expires_at>clock_timestamp() AND s.idle_until>clock_timestamp() AND u.status='ACTIVE' AND g.role='student' AND g.revoked_at IS NULL",[a.hash,a.id]);
-   if(!live.rowCount)throw fail(401,"UNAUTHENTICATED");
+   await lockSession(db,a);
    if(operation==="preflight")return E.preflight(db,id,a.id);
    if(operation==="start")return E.start(db,id,a.id);
    return E.attempt(db,id,a.id,operation,b);
@@ -104,8 +108,7 @@ async function handle(req,res){
   }
   try{
    const value=await tx(async db=>{
-    const live=await db.query("SELECT 1 FROM vpo_stage.sessions s JOIN vpo_stage.users u ON u.id=s.user_id JOIN vpo_stage.role_grants g ON g.user_id=u.id WHERE s.token_hash=$1 AND s.user_id=$2 AND s.expires_at>clock_timestamp() AND s.idle_until>clock_timestamp() AND u.status='ACTIVE' AND g.role='student' AND g.revoked_at IS NULL",[a.hash,a.id]);
-    if(!live.rowCount)throw fail(401,"UNAUTHENTICATED");
+    await lockSession(db,a);
     return (await db.query("SELECT vpo_stage.demo_student_action($1,$2,$3::uuid,$4::jsonb) AS value",[a.id,op,obj,JSON.stringify(b)])).rows[0].value;
    });
    return reply(res,list?200:201,{mode:"synthetic-staging",data:value});
@@ -133,8 +136,7 @@ async function handle(req,res){
   }
   try{
    const data=await tx(async db=>{
-    const live=await db.query("SELECT 1 FROM vpo_stage.sessions s JOIN vpo_stage.users u ON u.id=s.user_id JOIN vpo_stage.role_grants g ON g.user_id=u.id WHERE s.token_hash=$1 AND s.user_id=$2 AND s.expires_at>clock_timestamp() AND s.idle_until>clock_timestamp() AND u.status='ACTIVE' AND g.role='student' AND g.revoked_at IS NULL",[a.hash,a.id]);
-    if(!live.rowCount)throw fail(401,"UNAUTHENTICATED");
+    await lockSession(db,a);
     return (await db.query("SELECT vpo_stage.academy_student($1,$2,$3::uuid,$4::jsonb) AS value",[a.id,op,obj,JSON.stringify(b)])).rows[0].value;
    });
    return reply(res,op==="submit"&&!data.replayed?201:200,{mode:"synthetic-staging",data,...(op==="portfolio"?{analytics:A.analytics(data)}:{})});
