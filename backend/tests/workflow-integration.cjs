@@ -67,11 +67,17 @@ async function main(){
    assert.equal(await v.locator("#verification-data").getByText("Giải mẫu",{exact:true}).count(),expected==="Hợp lệ trong mô phỏng"?1:0);
   }
   // A scanned QR fragment is removed from location before verification; no auto request.
-  await v.goto(gateway+"/verify-demo#"+c.verification_token);await v.waitForFunction(()=>!location.hash);assert.equal(await v.locator("#token").inputValue(),c.verification_token);
+  console.log("CERTIFICATE CHECKPOINT: existing-tab QR entry");
+  await v.goto(gateway+"/verify-demo#"+c.verification_token);await v.waitForFunction(()=>!location.hash&&document.querySelector("#token").value.length===64);assert.equal(await v.locator("#token").inputValue(),c.verification_token);
+  const fresh=await verifyContext.newPage();try{await fresh.goto(gateway+"/verify-demo#"+c.verification_token);await fresh.waitForFunction(()=>!location.hash&&document.querySelector("#token").value.length===64);assert.equal(await fresh.locator("#token").inputValue(),c.verification_token);assert.equal(await fresh.locator("#verification").isVisible(),false);}finally{await fresh.close();}
+  assert.equal(await v.locator("#verification").isVisible(),false);
+  console.log("CERTIFICATE CHECKPOINT: QR entry in both existing and fresh tab");
   await checkCertificate(c.verification_token,"Hợp lệ trong mô phỏng");
   const documentPath=url+"/document.pdf";
+  console.log("CERTIFICATE CHECKPOINT: live PDF endpoint");
   const pdfResponse=await verifyContext.request.get(gateway+documentPath);assert.equal(pdfResponse.status(),200);assert.equal(pdfResponse.headers()["content-type"],"application/pdf");assert.equal(pdfResponse.headers()["cache-control"],"no-store");assert.match(pdfResponse.headers()["content-disposition"],/attachment/);
   const {PDFDocument}=require("pdf-lib");assert.equal((await PDFDocument.load(await pdfResponse.body())).getPageCount(),1);
+  console.log("CERTIFICATE CHECKPOINT: browser download");
   const [download]=await Promise.all([v.waitForEvent("download"),v.locator("#slip").click()]);assert.equal(download.suggestedFilename(),"VPO-DEMO-verification.pdf");assert.equal((await PDFDocument.load(require("node:fs").readFileSync(await download.path()))).getPageCount(),1);await download.delete();
   assert.equal((await verifyContext.request.get(gateway+"/public/certificates/"+"0".repeat(64)+"/document.pdf")).status(),404);
   assert.equal((await call("/public/certificates/"+"0".repeat(64))).status,404);
