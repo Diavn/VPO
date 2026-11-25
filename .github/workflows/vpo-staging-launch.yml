@@ -1,19 +1,19 @@
-name: VPO V6.6 finance and results master regression
+name: VPO V6.6.1 operational finance master regression
 on:
   push:
-    branches: [v6.6-finance-results]
+    branches: [v6.6.1-operational-finance]
   pull_request:
-    branches: [v6.5.1-academic-admin]
+    branches: [v6.6-finance-results]
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: vpo-finance-results
+  group: vpo-operational-finance
   cancel-in-progress: true
 jobs:
   fresh-launch:
-    if: github.ref == 'refs/heads/v6.6-finance-results' || (github.event_name == 'pull_request' && github.head_ref == 'v6.6-finance-results' && github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.ref == 'refs/heads/v6.6.1-operational-finance' || (github.event_name == 'pull_request' && github.head_ref == 'v6.6.1-operational-finance' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
