@@ -1,7 +1,7 @@
-"use strict";const $=id=>document.getElementById(id);let token="",busy=false,pendingRound=null;
+"use strict";const $=id=>document.getElementById(id);let token="",busy=false,pendingRound=null,contentEdit=null;
 async function api(path,b){const r=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json",...(token?{Authorization:"Bearer "+token}:{})},body:JSON.stringify(b),cache:"no-store",signal:AbortSignal.timeout(15000)});const j=await r.json();if(!r.ok)throw Object.assign(Error(j.error||"HTTP "+r.status),{status:r.status});return j;}
 async function run(fn){if(busy)return;busy=true;document.querySelectorAll("button").forEach(b=>b.disabled=true);try{await fn();}catch(e){if(e.status===401&&token)clear();$("status").textContent="Không hoàn tất: "+e.message;}finally{busy=false;document.querySelectorAll("button").forEach(b=>b.disabled=false);}}
-function clear(){token="";pendingRound=null;if($("workspace")){$("workspace").hidden=true;$("login").hidden=false;$("users").replaceChildren();$("invited").textContent="";$("password").value="";for(const id of ["overview","rounds","audit"])$(id)?.replaceChildren();$("enrol-round")?.replaceChildren(new Option("Chọn vòng thi",""));$("round-created").textContent="";$("round-topic").value="";$("round-label").value="DEMO ";$("round-open").value="";$("round-close").value="";}if($("newpass")){$("newpass").value="";$("code").value="";}}
+function clear(){token="";pendingRound=null;contentEdit=null;if($("workspace")){$("workspace").hidden=true;$("login").hidden=false;$("users").replaceChildren();$("invited").textContent="";$("password").value="";for(const id of ["overview","rounds","audit","content-list"])$(id)?.replaceChildren();$("enrol-round")?.replaceChildren(new Option("Chọn vòng thi",""));$("round-created").textContent="";$("round-topic").value="";$("round-label").value="DEMO ";$("round-open").value="";$("round-close").value="";$("content-title").value="";$("content-body").value="";$("content-status").textContent="";}if($("newpass")){$("newpass").value="";$("code").value="";}}
 if(document.body.dataset.page==="admin"){
  function node(tag,text,cls){const n=document.createElement(tag);n.textContent=text;if(cls)n.className=cls;return n;}
  function localTime(value){return new Date(value).toLocaleString("vi-VN",{timeZoneName:"short"});}
@@ -21,6 +21,18 @@ if(document.body.dataset.page==="admin"){
   $("audit").replaceChildren();
   for(const event of audit.data)$("audit").append(node("div",localTime(event.created_at)+" · "+event.action+" · "+(event.email||"")+" "+(event.round_label||""),"audit-event"));
  }
+ function newContent(){contentEdit=null;$("content-title").value="";$("content-body").value="";$("content-status").textContent="Bản nháp mới";}
+ async function contentList(){
+  const r=await api("/api/admin/content-list",{}),root=$("content-list");root.replaceChildren();
+  for(const v of r.data){const a=node("article","");a.append(node("h3",v.title),node("p",v.category+" · "+v.state+" · #"+v.revision));
+   if(v.state==="DRAFT"){const edit=node("button","Sửa bản nháp");edit.onclick=()=>{contentEdit={id:v.id,revision:v.revision};$("content-category").value=v.category;$("content-title").value=v.title;$("content-body").value=v.body;$("content-status").textContent="Đang sửa bản #"+v.revision;};a.append(edit);}
+   if(v.state==="DRAFT"||v.state==="PUBLISHED"){const action=v.state==="DRAFT"?"publish":"withdraw",b=node("button",action==="publish"?"Công bố mẫu":"Gỡ công bố");b.onclick=()=>run(async()=>{if(!confirm("Xác nhận "+b.textContent+"?"))return;await api("/api/admin/content-transition",{id:v.id,revision:v.revision,action});if(contentEdit?.id===v.id)newContent();await contentList();});a.append(b);}
+   root.append(a);
+  }
+ }
+ $("content-new").onclick=()=>{if(confirm("Bỏ nội dung chưa lưu?"))newContent();};
+ $("content-refresh").onclick=()=>run(contentList);
+ $("content-save").onclick=()=>run(async()=>{if(!contentEdit)contentEdit={id:crypto.randomUUID(),revision:0};const b={...contentEdit,category:$("content-category").value,title:$("content-title").value.trim(),body:$("content-body").value.trim()};await api("/api/admin/content-save",b);contentEdit.revision++;$("content-status").textContent="Đã lưu bản nháp #"+contentEdit.revision;await contentList();});
  $("refresh-admin").onclick=()=>run(dashboard);
  $("create-round").onclick=()=>run(async()=>{
   const open=new Date($("round-open").value),close=new Date($("round-close").value);
