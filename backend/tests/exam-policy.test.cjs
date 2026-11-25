@@ -1,0 +1,12 @@
+"use strict";
+const test=require("node:test"),assert=require("node:assert/strict"),P=require("../exam-policy.cjs");
+const a={state:"ACTIVE",latest_seq:3,deadline:"2026-11-25T10:30:00Z"};
+const before="2026-11-25T10:29:59Z",at=a.deadline;
+const b={expected_seq:3,op_id:"12345678-1234-4123-8123-123456789abc",body:"example"};
+test("strict draft schema and byte cap",()=>{assert(P.validDraft(b));assert(!P.validDraft({...b,user_id:"x"}));assert(!P.validDraft({...b,body:"é".repeat(20001)}));assert(!P.validDraft({...b,body:"\u0000"}));assert(!P.validDraft({...b,body:"\ud800"}));assert(P.validDraft({...b,body:"😀"}));});
+test("deadline inclusive",()=>{assert(!P.due(a,before));assert(P.due(a,at));assert(!P.due({...a,state:"SUBMITTED"},at));});
+test("save only next revision",()=>{assert.equal(P.draftDecision(a,b,null,before),"SAVE");assert.equal(P.draftDecision(a,{...b,expected_seq:2},null,before),"STALE");});
+test("retry same op after expiry is ACK only",()=>{assert.equal(P.draftDecision({...a,state:"EXPIRED"},b,{seq:4,body:"example"},at),"REPLAY");assert.equal(P.draftDecision(a,b,{seq:4,body:"different"},before),"OP_CONFLICT");});
+test("new draft blocked at deadline or submit",()=>{assert.equal(P.draftDecision(a,b,null,at),"CLOSED");assert.equal(P.draftDecision({...a,state:"SUBMITTED"},b,null,before),"CLOSED");});
+test("submit compares seq and deadline",()=>{assert.equal(P.submitDecision(a,b,before),"SUBMIT");assert.equal(P.submitDecision(a,{expected_seq:2},before),"STALE");assert.equal(P.submitDecision(a,b,at),"DEADLINE");assert.equal(P.submitDecision({...a,state:"SUBMITTED"},b,before),"REPLAY");});
+test("event schema excludes personal/device data",()=>{assert(P.validEvent({event_id:b.op_id,kind:"HIDDEN"}));assert(!P.validEvent({event_id:b.op_id,kind:"HIDDEN",url:"example"}));assert(!P.validEvent({event_id:b.op_id,kind:"CHEATING"}));assert(P.validSubmit({expected_seq:0}));assert(!P.validSubmit({expected_seq:0,body:"overwrite"}));});
