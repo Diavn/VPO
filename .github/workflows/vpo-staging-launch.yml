@@ -1,19 +1,19 @@
-name: VPO V6.5 student content master regression
+name: VPO V6.5.1 academic administration master regression
 on:
   push:
-    branches: [v6.5-student-content]
+    branches: [v6.5.1-academic-admin]
   pull_request:
-    branches: [v6.4.1-account-hardening]
+    branches: [v6.5-student-content]
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: vpo-student-content
+  group: vpo-academic-admin
   cancel-in-progress: true
 jobs:
   fresh-launch:
-    if: github.ref == 'refs/heads/v6.5-student-content' || (github.event_name == 'pull_request' && github.head_ref == 'v6.5-student-content' && github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.ref == 'refs/heads/v6.5.1-academic-admin' || (github.event_name == 'pull_request' && github.head_ref == 'v6.5.1-academic-admin' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
