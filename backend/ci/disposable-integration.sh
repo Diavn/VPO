@@ -26,7 +26,7 @@ GRANT CREATE ON DATABASE vpo_ci TO vpo_migrator;
 SQL
 dburl(){ printf 'postgresql://%s:%s@127.0.0.1:5432/vpo_ci' "$1" "${pass[$1]}"; }
 owner(){ PGUSER=vpo_migrator PGPASSWORD="${pass[vpo_migrator]}" psql -X -v ON_ERROR_STOP=1 "$@"; }
-for migration in schema.sql grants.sql exam-schema.sql workflow-schema.sql workflow-functions.sql academy-schema.sql academy-functions.sql integrity.sql; do
+for migration in schema.sql grants.sql exam-schema.sql workflow-schema.sql workflow-functions.sql academy-schema.sql academy-functions.sql integrity.sql security-hardening.sql; do
  echo "Applying $migration"
  owner -q -f "$migration"
 done
@@ -71,6 +71,7 @@ node tests/academy-integration.cjs
 export VPO_CI_OWNER_DB="$(dburl vpo_migrator)"
 node tests/integrity-integration.cjs
 if [[ "${VPO_BROWSER_TESTS:-}" == yes ]]; then node tests/browser-integration.cjs; fi
+node tests/security-integration.cjs
 if [[ "${VPO_LOAD_RECOVERY_TESTS:-}" == yes ]]; then
  node tests/load-pilot.cjs
  kill "$server_pid"
