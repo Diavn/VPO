@@ -2,7 +2,14 @@
 const $=id=>document.getElementById(id);
 let busy=false,generation=0;
 function clearSlip(){$("slip").hidden=true;$("slip").removeAttribute("href");}
-const scanned=location.hash.slice(1);if(scanned){history.replaceState(null,"",location.pathname+location.search);if(/^[a-f0-9]{64}$/.test(scanned))$("token").value=scanned;}
+function readScan(){
+ const scanned=location.hash.slice(1);if(!scanned)return;
+ history.replaceState(null,"",location.pathname+location.search);
+ generation++;clearSlip();$("verification").hidden=true;$("verification-data").replaceChildren();
+ $("token").value=/^[a-f0-9]{64}$/.test(scanned)?scanned:"";
+ $("verify-status").textContent=$("token").value?"Mã QR đã nhập. Bấm kiểm tra trạng thái.":"Mã xác minh mẫu không hợp lệ.";
+}
+window.addEventListener("hashchange",readScan);readScan();
 $("verify-form").addEventListener("submit",async e=>{
  e.preventDefault();if(busy)return;const token=$("token").value.trim();
  clearSlip();$("verification").hidden=true;$("verification-data").replaceChildren();
@@ -22,6 +29,6 @@ $("verify-form").addEventListener("submit",async e=>{
   if(v.status==="VALID_DEMO"){$("slip").href="/public/certificates/"+token+"/document.pdf";$("slip").hidden=false;}
   $("verification").hidden=false;$("verify-status").textContent="Đã kiểm tra trạng thái mẫu.";
  }catch{if(attempt===generation)$("verify-status").textContent="Không xác minh được. Làm mới để thử lại.";}
- finally{$("token").value="";busy=false;$("verify").disabled=false;}
+ finally{if(attempt===generation)$("token").value="";busy=false;$("verify").disabled=false;}
 });
 window.addEventListener("pagehide",()=>{generation++;clearSlip();$("token").value="";$("verification").hidden=true;$("verification-data").replaceChildren();$("verify-status").textContent="";});
