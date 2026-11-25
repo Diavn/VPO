@@ -123,7 +123,16 @@ async function main(){
  const own=await ctx.request.get(base+"/me/rounds");assert.equal(own.status(),200);const my=(await own.json()).data;assert(my.some(v=>v.id===round&&v.availability==="OPEN"));assert(my.every(v=>!Object.hasOwn(v,"topic")&&!Object.hasOwn(v,"topic_snapshot")));
  const roundLink=p.locator('#my-rounds a').filter({hasText:"Mở vòng / xem biên nhận"});await roundLink.waitFor();assert.equal(await roundLink.getAttribute("href"),"/exam-demo?round="+round);await roundLink.click();await p.waitForURL(base+"/exam-demo?round="+round);assert.equal(await p.locator("#round").inputValue(),round);
  await p.locator("#email").fill(email);await p.locator("#password").fill(pass);await p.locator("#login").click();await p.waitForFunction(()=>!document.querySelector("#preflight").disabled);
- await p.locator("#preflight").click();await p.waitForFunction(()=>!document.querySelector("#start").disabled);await p.locator("#start").click();await p.waitForFunction(()=>!document.querySelector("#essay").disabled);
+ await p.locator("#preflight").click();await p.waitForFunction(()=>!document.querySelector("#start").disabled);let releaseTopic;const topicGate=new Promise(resolve=>{releaseTopic=resolve;});
+ let notifyTopic;const topicRequested=new Promise(resolve=>{notifyTopic=resolve;});
+ const topicPattern="**/attempts/*/topics";
+ const delayTopic=async route=>{notifyTopic();await topicGate;await route.continue();};
+ await p.route(topicPattern,delayTopic);
+ try{
+  await p.locator("#start").click();await Promise.race([topicRequested,new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error("Topic request missing")),12000);timer.unref();})]);
+  assert.equal(await p.locator("#essay").isDisabled(),true,"Editor must remain locked while authoritative topic is pending");
+ }finally{releaseTopic();await p.unroute(topicPattern,delayTopic);}
+ await p.waitForFunction(()=>!document.querySelector("#essay").disabled);
  assert.equal(await p.locator("#topic").textContent(),qtopic);
  console.log("QUESTION SNAPSHOT PASS: selected earlier question version delivered to started attempt.");
  const guardLogin=await adminCall("login",{username:"admin",password:e.VPO_TEST_ADMIN_PASSWORD},"");assert.equal(guardLogin.status,200);
