@@ -17,3 +17,6 @@ Sources:
 - https://www.philosophy-olympiad.org/?page_id=2
 - https://www.philosophy-olympiad.org/?page_id=72
 - https://tienphong.vn/tu-bai-luan-triet-hoc-den-yale-cambridge-virginia-khi-tu-duy-viet-buoc-ra-the-gioi-post1817864.tpo
+
+## V4.1 academic content update
+Brand palette selected by project owner: Navy #142C46, Gold #B69A63, Ivory #F7F4EC, Vietnam Red #A53036, Charcoal #263238. Mark vector reproduced from uploaded V3.1 assets; horizontal lockups reproduce the geometry with live text instead of outlined text. Original PNG assets not transferred. Content follows V3.0 blueprint, sections 23–33; actual source vpovietnam.org could not be retrieved. No individual award records, news or photographs invented. Public-facing legacy-site links removed by request; original URL retained here solely as migration provenance. The main page remains a public preview pending verification and backend development.
