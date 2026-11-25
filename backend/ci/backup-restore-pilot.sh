@@ -20,7 +20,7 @@ SQL
 }
 start="$(date +%s)"
 snapshot vpo_ci > "$tmp/before"
-[[ "$(wc -l < "$tmp/before" | tr -d ' ')" == 35 ]]
+[[ "$(wc -l < "$tmp/before" | tr -d ' ')" == 36 ]]
 pg_dump --format=custom --schema=vpo_stage --file="$tmp/stage.dump" vpo_ci
 createdb -T template0 vpo_ci_restore
 created=yes
@@ -45,10 +45,11 @@ DO $account_acl$ BEGIN
  IF NOT has_function_privilege(current_user,'vpo_stage.admin_create_round(uuid,text,timestamptz,timestamptz,integer,text)','EXECUTE') OR NOT has_function_privilege(current_user,'vpo_stage.admin_enrol(uuid,uuid)','EXECUTE') THEN RAISE EXCEPTION 'Missing admin round routine privilege'; END IF;
  IF NOT has_function_privilege(current_user,'vpo_stage.password_reset_begin(uuid,text,text)','EXECUTE') OR NOT has_function_privilege(current_user,'vpo_stage.password_reset_finish(uuid,text,text)','EXECUTE') THEN RAISE EXCEPTION 'Missing reset routine privilege'; END IF;
  IF has_table_privilege(current_user,'vpo_stage.password_reset_challenges','SELECT') OR has_table_privilege(current_user,'vpo_stage.password_reset_challenges','INSERT') OR has_table_privilege(current_user,'vpo_stage.password_reset_challenges','UPDATE') OR has_table_privilege(current_user,'vpo_stage.password_reset_challenges','DELETE') THEN RAISE EXCEPTION 'Reset direct grants invalid'; END IF;
+ IF NOT has_function_privilege(current_user,'vpo_stage.content_save(uuid,text,text,text,integer)','EXECUTE') OR has_table_privilege(current_user,'vpo_stage.content_entries','INSERT') OR has_table_privilege(current_user,'vpo_stage.content_entries','SELECT') THEN RAISE EXCEPTION 'Content ACL invalid'; END IF;
  IF has_table_privilege(current_user,'vpo_stage.demo_rounds','INSERT') OR has_table_privilege(current_user,'vpo_stage.demo_enrolments','INSERT') OR has_table_privilege(current_user,'vpo_stage.account_admin_audit','DELETE') THEN RAISE EXCEPTION 'Admin direct grants invalid'; END IF;
  IF has_table_privilege(current_user,'vpo_stage.registration_challenges','SELECT') OR has_table_privilege(current_user,'vpo_stage.users','UPDATE') OR has_table_privilege(current_user,'vpo_stage.demo_drafts','SELECT') THEN RAISE EXCEPTION 'Account direct grants invalid'; END IF;
 END $account_acl$;
 ROLLBACK;
 SQL
-echo "RESTORE PASS: all 35 table row counts/content digests match, sampled ACL/RLS preserved; elapsed $(( $(date +%s)-start )) seconds."
+echo "RESTORE PASS: all 36 table row counts/content digests match, sampled ACL/RLS preserved; elapsed $(( $(date +%s)-start )) seconds."
 echo 'Offline same-cluster logical restore only; not PITR, disaster recovery or production RTO/RPO evidence.'

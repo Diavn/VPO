@@ -10,8 +10,9 @@ async function main(){
  const register=await fetch(base+"/register");const csp=register.headers.get("content-security-policy");assert.match(csp,/connect-src 'self'/);assert(!csp.includes("connect-src 'none'"));await register.text();
  const ok=await fetch(base+"/healthz");assert.equal(ok.status,200);assert.deepEqual(await ok.json(),{mode:"synthetic-staging",student:200,accounts:200});
  for(const p of ["/backend/schema.sql","/.git/config","/VPO/../backend/schema.sql","/VPO/%2e%2e/backend/security.cjs","/api/admin/unknown","/api/action"])assert.equal((await fetch(base+p)).status,404);
+ assert.equal((await fetch(base+"/me/rounds")).status,401);
  const bad=await fetch(base+"/api/admin/login",{method:"POST",headers:{Origin:"http://foreign.example.test","Content-Type":"application/json"},body:"{}"});assert.equal(bad.status,403);
- for(const route of ["overview","rounds","audit","round-create","enrol"]){const denied=await fetch(base+"/api/admin/"+route,{method:"POST",headers:{Origin:base,"Content-Type":"application/json"},body:"{}"});assert.equal(denied.status,401);}
+ for(const route of ["overview","rounds","audit","round-create","enrol","content-list","content-save","content-transition"]){const denied=await fetch(base+"/api/admin/"+route,{method:"POST",headers:{Origin:base,"Content-Type":"application/json"},body:"{}"});assert.equal(denied.status,401);}
  async function adminCall(route,body,token){const r=await fetch(base+"/api/admin/"+route,{method:"POST",headers:{Origin:base,"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});return {status:r.status,data:await r.json()};}
  // First isolate the HTTP gateway from browser behavior, without consuming a real email.
  const probeEmail="gateway-probe-"+randomBytes(6).toString("hex")+"@example.test";
@@ -54,6 +55,23 @@ async function main(){
  const journal=await adminCall("audit",{},adminToken);assert.equal(journal.data.data.filter(x=>x.action==="ENROLLED"&&x.round_id===round&&x.user_id===uid).length,1);assert.equal(journal.data.data.filter(x=>x.action==="ROUND_CREATED"&&x.round_id===round).length,1);
  assert.equal((await adminCall("round-create",{label:"invalid",opens_at:new Date().toISOString(),closes_at:new Date(Date.now()+600000).toISOString(),duration_seconds:60,topic:"x"},adminToken)).status,422);
  const fake=await adminCall("users",{search:e.VPO_TEST_B_EMAIL},adminToken);assert.equal((await adminCall("enrol",{user_id:fake.data.data[0].id,round_id:round},adminToken)).status,409);
+ const title="DEMO bulletin "+randomBytes(4).toString("hex"),literal="<b>Plain text only</b>";
+ await p.locator("#content-title").fill(title);await p.locator("#content-body").fill(literal);
+ await postClick("#content-save","/api/admin/content-save",201);
+ await p.waitForFunction(()=>document.querySelector("#content-status").textContent.includes("Đã lưu"));
+ const entries=await adminCall("content-list",{},adminToken);const entry=entries.data.data.find(v=>v.title===title);assert.equal(entry.state,"DRAFT");
+ const publicList=async()=>{const r=await fetch(base+"/api/public/content");assert.equal(r.status,200);return (await r.json()).data;};
+ assert(!(await publicList()).some(v=>v.id===entry.id));
+ await p.locator("#content-body").fill(literal+"\nRevised");await postClick("#content-save","/api/admin/content-save",200);
+ await p.waitForFunction(()=>document.querySelector("#content-status").textContent.includes("#2"));
+ assert.equal((await adminCall("content-save",{id:entry.id,category:"NEWS",title,body:"stale conflicting update",revision:1},adminToken)).status,409);
+ p.once("dialog",d=>d.accept());await postClick("#content-list button:text-is('Công bố mẫu')","/api/admin/content-transition",200);
+ await p.waitForFunction(()=>document.querySelector("#content-list").textContent.includes("PUBLISHED"));
+ const preview=await ctx.newPage();try{await preview.goto(base+"/bulletin");await preview.getByRole("heading",{name:title,exact:true}).waitFor();assert.equal(await preview.locator("#bulletin b").count(),0);assert.equal(await preview.locator("#bulletin .content-body").textContent(),literal+"\nRevised");}finally{await preview.close();}
+ assert.equal((await adminCall("content-save",{id:entry.id,category:"NEWS",title,body:"edit published",revision:3},adminToken)).status,409);
+ p.once("dialog",d=>d.accept());await postClick("#content-list button:text-is('Gỡ công bố')","/api/admin/content-transition",200);
+ await p.waitForFunction(()=>document.querySelector("#content-list").textContent.includes("WITHDRAWN"));assert(!(await publicList()).some(v=>v.id===entry.id));
+ console.log("CMS PASS: browser draft/edit/publish/withdraw, draft isolation, stale revision and published edit denied, literal text rendering.");
  await p.locator("#logout").click();await p.locator("#login").waitFor({state:"visible"});assert.equal((await adminCall("audit",{},adminToken)).status,401);
  console.log("ADMIN CENTER PASS: dashboard, browser round creation and verified enrolment, duplicate idempotence, journal and authorization.");
  // Separate admin logout must not remove the student session.
@@ -64,9 +82,10 @@ async function main(){
  const en=await db.query("INSERT INTO vpo_stage.academy_enrolments(course_id,user_id,mentor) SELECT course_id,$1,mentor FROM vpo_stage.academy_enrolments WHERE id=$2 RETURNING id",[uid,e.VPO_TEST_ACADEMY_ENROLMENT]);assert.equal(en.rowCount,1);
  }finally{await db.end();}
  await p.goto(base+"/staging");await p.locator("#dashboard").waitFor({state:"visible"});
- await p.locator('a[href="/exam-demo"]').click();await p.waitForURL(base+"/exam-demo");
+ const own=await ctx.request.get(base+"/me/rounds");assert.equal(own.status(),200);const my=(await own.json()).data;assert(my.some(v=>v.id===round&&v.availability==="OPEN"));assert(my.every(v=>!Object.hasOwn(v,"topic")&&!Object.hasOwn(v,"topic_snapshot")));
+ const roundLink=p.locator('#my-rounds a').filter({hasText:"Mở vòng / xem biên nhận"});await roundLink.waitFor();assert.equal(await roundLink.getAttribute("href"),"/exam-demo?round="+round);await roundLink.click();await p.waitForURL(base+"/exam-demo?round="+round);assert.equal(await p.locator("#round").inputValue(),round);
  await p.locator("#email").fill(email);await p.locator("#password").fill(pass);await p.locator("#login").click();await p.waitForFunction(()=>!document.querySelector("#preflight").disabled);
- await p.locator("#round").fill(round);await p.locator("#preflight").click();await p.waitForFunction(()=>!document.querySelector("#start").disabled);await p.locator("#start").click();await p.waitForFunction(()=>!document.querySelector("#essay").disabled);
+ await p.locator("#preflight").click();await p.waitForFunction(()=>!document.querySelector("#start").disabled);await p.locator("#start").click();await p.waitForFunction(()=>!document.querySelector("#essay").disabled);
  const guardLogin=await adminCall("login",{username:"admin",password:e.VPO_TEST_ADMIN_PASSWORD},"");assert.equal(guardLogin.status,200);
  const guard=guardLogin.data.token;
  for(const op of ["suspend","delete"])assert.equal((await adminCall("change",{id:uid,op},guard)).status,409);
@@ -82,10 +101,11 @@ async function main(){
  console.log("ACTIVE RECOVERY GUARD PASS: valid reset code does not interrupt active attempt.");
  await p.locator("#essay").fill("Synthetic gateway examination essay.");await p.locator("#save").click();await p.waitForFunction(()=>/xác nhận bản #1/.test(document.querySelector("#save-status").textContent));p.once("dialog",d=>d.accept());await p.locator("#submit").click();await p.waitForFunction(()=>document.querySelector("#state").textContent==="SUBMITTED");assert.match(await p.locator("#receipt-output").textContent(),/"seq": 1/);
  await p.goto(base+"/staging");await p.locator("#dashboard").waitFor({state:"visible"});
- await p.locator('a[href="/academy-demo"]').click();await p.waitForURL(base+"/academy-demo");
+ const courseLink=p.locator("#my-courses a");await courseLink.waitFor();const coursePath=await courseLink.getAttribute("href");assert.match(coursePath,/^\/academy-demo\?course=[a-f0-9-]{36}$/);await courseLink.click();await p.waitForURL(base+coursePath);
  await p.locator("#email").fill(email);await p.locator("#password").fill(pass);await p.locator("#login").click();await p.locator("#portfolio").waitFor({state:"visible"});
  assert.equal(await p.locator("#lessons article").count(),6);assert.equal(await p.locator("#tasks article").count(),3);
  await p.locator('[data-action="complete"]').first().click();await p.getByText("Đã tự báo hoàn thành",{exact:true}).first().waitFor();await p.locator("#logout").click();await p.locator("#portfolio").waitFor({state:"hidden"});
+ console.log("STUDENT DISCOVERY PASS: own enrolments, no topic disclosure, selected round and course links.");
  console.log("UNIFIED EXAM/ACADEMY PASS: enrolled synthetic student, save/receipt, course and completion through gateway.");
  await p.goto(base+"/staging");await p.locator("#login-panel").waitFor({state:"visible"});
  assert.equal((await ctx.request.get(base+"/me")).status(),401);

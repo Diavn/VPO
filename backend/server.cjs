@@ -69,6 +69,11 @@ async function handle(req,res){
   const a=await auth(req);const r=await tx(async db=>{await lockSession(db,a);return db.query("SELECT "+projection+" FROM vpo_stage.student_profiles WHERE user_id=$1",[a.id]);});if(!r.rowCount)throw fail(404,"PROFILE_NOT_FOUND");
   return reply(res,200,{role:"student",profile:r.rows[0],csrf:S.csrf(a.token,c.key),mode:"synthetic-staging"});
  }
+ if(path==="/me/rounds"&&req.method==="GET"){
+  const a=await auth(req);const data=await tx(async db=>{await lockSession(db,a);
+   return (await db.query("SELECT r.id,r.label,r.opens_at,r.closes_at,r.duration_seconds,a.state AS attempt_state,CASE WHEN a.id IS NOT NULL THEN CASE WHEN a.state='ACTIVE' AND a.deadline<=clock_timestamp() THEN 'AWAITING_SETTLEMENT' ELSE a.state END WHEN clock_timestamp()<r.opens_at THEN 'UPCOMING' WHEN clock_timestamp()>=r.closes_at THEN 'CLOSED' ELSE 'OPEN' END AS availability FROM vpo_stage.demo_enrolments e JOIN vpo_stage.demo_rounds r ON r.id=e.round_id LEFT JOIN vpo_stage.demo_attempts a ON a.round_id=r.id AND a.user_id=e.user_id WHERE e.user_id=$1 ORDER BY r.opens_at DESC,r.id LIMIT 100",[a.id])).rows;
+  });return reply(res,200,{data,mode:"synthetic-staging",limit:100});
+ }
  if(path==="/me/profile"&&req.method==="PATCH"){
   const a=await auth(req);requireCsrf(req,a);const b=S.profilePatch(await body(req));if(!b)throw fail(422,"INVALID_PROFILE");
   const profile=await tx(async db=>{await lockSession(db,a);const r=await db.query("UPDATE vpo_stage.student_profiles SET grade=$1,curriculum=$2,locale=$3,version=version+1 WHERE user_id=$4 AND version=$5 AND EXISTS(SELECT 1 FROM vpo_stage.role_grants g JOIN vpo_stage.users u ON u.id=g.user_id WHERE g.user_id=$4 AND g.role='student' AND g.revoked_at IS NULL AND u.status='ACTIVE') RETURNING "+projection,[b.grade,b.curriculum,b.locale,a.id,b.version]);if(!r.rowCount)throw fail(409,"STALE_OR_UNAVAILABLE");await db.query("INSERT INTO vpo_stage.audit_events(user_id,event) VALUES($1,'PROFILE_UPDATE')",[a.id]);return r.rows[0];});return reply(res,200,{profile});
