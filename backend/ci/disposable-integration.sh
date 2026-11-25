@@ -13,7 +13,7 @@ declare -A pass
 roles=(vpo_migrator vpo_runtime vpo_provision ci_exam_a ci_exam_b ci_moderator ci_approver ci_publisher ci_finance ci_appeal ci_cert ci_cert_approver ci_mentor_a ci_mentor_b)
 for role in "${roles[@]}"; do
  pass[$role]="$(openssl rand -hex 24)"
- echo "::add-mask::${pass[$role]}"
+ if [[ "${GITHUB_ACTIONS:-}" == true ]]; then echo "::add-mask::${pass[$role]}"; fi
  printf "CREATE ROLE %s LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB PASSWORD '%s';\n" "$role" "${pass[$role]}" | psql -Xq -v ON_ERROR_STOP=1
 done
 psql -Xq -v ON_ERROR_STOP=1 <<'SQL'
@@ -37,7 +37,7 @@ INSERT INTO vpo_stage.academy_mentors(login_name) VALUES ('ci_mentor_a'),('ci_me
 SQL
 export VPO_TEST_A_EMAIL=learner-a@example.test VPO_TEST_B_EMAIL=learner-b@example.test
 export VPO_TEST_A_PASSWORD="$(openssl rand -hex 24)" VPO_TEST_B_PASSWORD="$(openssl rand -hex 24)"
-echo "::add-mask::$VPO_TEST_A_PASSWORD"; echo "::add-mask::$VPO_TEST_B_PASSWORD"
+if [[ "${GITHUB_ACTIONS:-}" == true ]]; then echo "::add-mask::$VPO_TEST_A_PASSWORD"; echo "::add-mask::$VPO_TEST_B_PASSWORD"; fi
 export DATABASE_URL="$(dburl vpo_provision)"
 printf '%s\n' "$VPO_TEST_A_PASSWORD" | node provision.cjs "$VPO_TEST_A_EMAIL"
 printf '%s\n' "$VPO_TEST_B_PASSWORD" | node provision.cjs "$VPO_TEST_B_EMAIL"
