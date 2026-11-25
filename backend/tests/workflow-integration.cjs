@@ -66,18 +66,25 @@ async function main(){
    await v.locator("#token").fill(code);await v.locator("#verify").click();await v.getByText(expected,{exact:true}).waitFor();await v.waitForFunction(()=>!document.querySelector("#verify").disabled);assert.equal(await v.locator("#token").inputValue(),"");
    assert.equal(await v.locator("#verification-data").getByText("Giải mẫu",{exact:true}).count(),expected==="Hợp lệ trong mô phỏng"?1:0);
   }
+  // A scanned QR fragment is removed from location before verification; no auto request.
+  await v.goto(gateway+"/verify-demo#"+c.verification_token);await v.waitForFunction(()=>!location.hash);assert.equal(await v.locator("#token").inputValue(),c.verification_token);
   await checkCertificate(c.verification_token,"Hợp lệ trong mô phỏng");
+  const documentPath=url+"/document.pdf";
+  const pdfResponse=await verifyContext.request.get(gateway+documentPath);assert.equal(pdfResponse.status(),200);assert.equal(pdfResponse.headers()["content-type"],"application/pdf");assert.equal(pdfResponse.headers()["cache-control"],"no-store");assert.match(pdfResponse.headers()["content-disposition"],/attachment/);
+  const {PDFDocument}=require("pdf-lib");assert.equal((await PDFDocument.load(await pdfResponse.body())).getPageCount(),1);
+  const [download]=await Promise.all([v.waitForEvent("download"),v.locator("#slip").click()]);assert.equal(download.suggestedFilename(),"VPO-DEMO-verification.pdf");assert.equal((await PDFDocument.load(require("node:fs").readFileSync(await download.path()))).getPageCount(),1);await download.delete();
+  assert.equal((await verifyContext.request.get(gateway+"/public/certificates/"+"0".repeat(64)+"/document.pdf")).status(),404);
   assert.equal((await call("/public/certificates/"+"0".repeat(64))).status,404);
   const appeal="/me/results/"+cid+"/appeal";assert.equal((await call(appeal,"POST",b,{category:"SCORING"})).status,404);
   await p.locator("#appeal-"+cid).selectOption("SCORING");p.once("dialog",d=>d.accept());
   const [appealed]=await Promise.all([p.waitForResponse(r=>new URL(r.url()).pathname===appeal&&r.request().method()==="POST"),p.getByRole("button",{name:"Gửi phúc khảo mẫu",exact:true}).click()]);
-  assert.equal(appealed.status(),201);await p.getByText("Phúc khảo: Đang xem xét",{exact:true}).waitFor();assert.equal((await call(url)).data.status,"ON_HOLD");await checkCertificate(c.verification_token,"Đang tạm giữ");
+  assert.equal(appealed.status(),201);await p.getByText("Phúc khảo: Đang xem xét",{exact:true}).waitFor();assert.equal((await call(url)).data.status,"ON_HOLD");await checkCertificate(c.verification_token,"Đang tạm giữ");assert.equal(await v.locator("#slip").isVisible(),false);assert.equal(await v.locator("#slip").getAttribute("href"),null);assert.equal((await verifyContext.request.get(gateway+documentPath)).status(),409);
   await staff("ci_appeal","appeal_decide",cid,{decision:"DISMISSED",reason:"Synthetic review"});assert.equal((await call(url)).data.status,"VALID_DEMO");
   await p.locator("#refresh").click();await p.getByText("Phúc khảo: Không chấp nhận",{exact:true}).waitFor();await checkCertificate(c.verification_token,"Hợp lệ trong mô phỏng");
   await staff("ci_cert","cert_revoke_request",c.certificate_id,{reason:"Synthetic revocation"});
   await assert.rejects(()=>staff("ci_cert","cert_revoke_approve",c.certificate_id));assert.equal((await call(url)).data.status,"ON_HOLD");
   await staff("ci_cert_approver","cert_revoke_approve",c.certificate_id);assert.equal((await call(url)).data.status,"REVOKED");
-  await checkCertificate(c.verification_token,"Đã thu hồi");await checkCertificate("0".repeat(64),"Không tìm thấy chứng nhận mẫu.");assert.equal(await v.locator("#verification").isVisible(),false);
+  await checkCertificate(c.verification_token,"Đã thu hồi");assert.equal(await v.locator("#slip").isVisible(),false);assert.equal((await verifyContext.request.get(gateway+documentPath)).status(),409);console.log("DEMO CERTIFICATE PDF PASS: QR fragment entry, browser PDF download, valid parse, no-store, held/revoked/unknown denied.");await checkCertificate("0".repeat(64),"Không tìm thấy chứng nhận mẫu.");assert.equal(await v.locator("#verification").isVisible(),false);
   assert.equal(errors.length,0);
   console.log("FINANCE RESULTS UI PASS: gateway browser payment report, independent reconciliation, published result isolation, appeal and anonymous certificate status lifecycle.");
   await call("/auth/logout","POST",a);await call("/auth/logout","POST",b);
