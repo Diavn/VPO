@@ -17,7 +17,7 @@ for port in 5432 8080 8082; do
 done
 export VPO_MODE=synthetic-staging VPO_PORT=8080 VPO_ORIGIN=http://localhost:8080
 if [[ "$mode" != --check ]]; then
- echo 'Use a Private port only. Do not forward PostgreSQL (5432).'
+ echo 'Keep forwarded ports 8080, 8082 Private (8081 only for local staff desk). Do not forward PostgreSQL (5432).'
  read -r -p 'Type PRIVATE to confirm: ' confirmation
  [[ "$confirmation" == PRIVATE ]] || exit 1
 fi
