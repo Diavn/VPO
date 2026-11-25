@@ -38,7 +38,7 @@ async function handle(req,res){
  if(method==="GET"&&route==="/healthz"){try{const r=await Promise.all([8080,8082].map(p=>upstream(p,"/healthz","GET",Buffer.alloc(0),{})));return reply(res,r.every(x=>x.status===200)?200:503,{mode:"synthetic-staging",student:r[0].status,accounts:r[1].status});}catch{return reply(res,503,{error:"UPSTREAM_UNAVAILABLE"});}}
  if(method==="GET"&&route.startsWith("/VPO/")&&files.has(route.slice(5))){
   const file=route.slice(5);let b=fs.readFileSync(path.join(root,file));
-  if(file.endsWith(".html"))b=Buffer.from(b.toString("utf8").replace("<body>",'<body><nav class="wrap actions" aria-label="Private staging services"><a href="/staging">Student Dashboard</a> <a href="/register">Register / Đăng ký mẫu</a> <a href="/admin">Admin</a></nav>'));
+  if(file.endsWith(".html"))b=Buffer.from(b.toString("utf8").replace("</header>",'</header><nav class="wrap actions" aria-label="Private staging services"><a href="/staging">Student Dashboard</a> <a href="/register">Register / Đăng ký mẫu</a> <a href="/admin">Admin</a></nav>'));
   res.writeHead(200,headers(mime[path.extname(file)]));return res.end(b);
  }
  let port=0;
@@ -50,10 +50,11 @@ async function handle(req,res){
  if(req.headers["content-encoding"]||Number(req.headers["content-length"]||0)>65536)return reply(res,413,{error:"BODY_LIMIT"});
  const chunks=[];let n=0;for await(const b of req){n+=b.length;if(n>65536)return reply(res,413,{error:"BODY_LIMIT"});chunks.push(b);}
  const r=await upstream(port,req.url,method,Buffer.concat(chunks),req.headers);
+ if(r.status>=400&&accountAPI.has(route))console.error("ACCOUNT_UPSTREAM_STATUS",JSON.stringify({route,status:r.status}));
  const out=headers(r.headers["content-type"]||"application/octet-stream");
  for(const name of ["content-security-policy","retry-after"])if(r.headers[name])out[name]=r.headers[name];
  if(port===8080&&r.headers["set-cookie"])out["set-cookie"]=r.headers["set-cookie"];
  res.writeHead(r.status,out);res.end(r.body);
 }
-const server=http.createServer({maxHeaderSize:8192,requestTimeout:15000,headersTimeout:5000,keepAliveTimeout:3000},(req,res)=>handle(req,res).catch(()=>{if(!res.headersSent&&!res.destroyed)reply(res,502,{error:"UPSTREAM_UNAVAILABLE"});}));
+const server=http.createServer({maxHeaderSize:8192,requestTimeout:15000,headersTimeout:5000,keepAliveTimeout:3000},(req,res)=>handle(req,res).catch(err=>{console.error("GATEWAY_FAILURE",["ECONNREFUSED","ECONNRESET","ETIMEDOUT","EPIPE","ERR_HTTP_INVALID_HEADER_VALUE","ERR_INVALID_ARG_TYPE"].includes(err.code)?err.code:err.name);if(!res.headersSent&&!res.destroyed)reply(res,502,{error:"UPSTREAM_UNAVAILABLE"});}));
 server.maxConnections=100;server.listen(8091,"127.0.0.1",()=>console.log("Synthetic unified portal ready"));server.on("error",()=>process.exit(1));process.once("SIGTERM",()=>{server.close(()=>process.exit(0));setTimeout(()=>process.exit(1),5000).unref();});
