@@ -42,7 +42,8 @@ async function main(){
  const dates=await p.evaluate(()=>{function fmt(n){const d=new Date(n);return new Date(n-d.getTimezoneOffset()*60000).toISOString().slice(0,19);}return {open:fmt(Date.now()-30000),close:fmt(Date.now()+600000)};});
  const label="DEMO admin-created round "+randomBytes(4).toString("hex");
  await p.locator("#round-label").fill(label);await p.locator("#round-open").fill(dates.open);await p.locator("#round-close").fill(dates.close);await p.locator("#round-duration").fill("180");await p.locator("#round-topic").fill("Synthetic unified question");
- p.once("dialog",d=>d.accept());const created=await postClick("#create-round","/api/admin/round-create",201);const round=(await created.json()).id;
+ p.once("dialog",d=>d.accept());const created=await postClick("#create-round","/api/admin/round-create",201);const round=(await created.json()).id,roundPayload=created.request().postDataJSON();
+ const replays=await Promise.all([adminCall("round-create",roundPayload,adminToken),adminCall("round-create",roundPayload,adminToken)]);for(const r of replays){assert.equal(r.status,200);assert.equal(r.data.id,round);assert.equal(r.data.result,"REPLAY");}assert.equal((await adminCall("round-create",{...roundPayload,topic:"Different synthetic topic"},adminToken)).status,409);
  await p.waitForFunction(id=>document.querySelector("#enrol-round").value===id,round);
  p.once("dialog",d=>d.accept());await postClick("#users button:text-is('Ghi danh')","/api/admin/enrol",201);
  await p.waitForFunction(()=>document.querySelector("#status").textContent==="Đã ghi danh.");
@@ -50,7 +51,7 @@ async function main(){
  await p.waitForFunction(()=>document.querySelector("#status").textContent==="Đã ghi danh trước đó.");
  const users=await adminCall("users",{search:email},adminToken);assert.equal(users.status,200);const uid=users.data.data[0].id;
  const listed=await adminCall("rounds",{},adminToken);const record=listed.data.data.find(x=>x.id===round);assert.equal(record.enrolments,1);assert(!("topic" in record));
- const journal=await adminCall("audit",{},adminToken);assert.equal(journal.data.data.filter(x=>x.action==="ENROLLED"&&x.round_id===round&&x.user_id===uid).length,1);assert(journal.data.data.some(x=>x.action==="ROUND_CREATED"&&x.round_id===round));
+ const journal=await adminCall("audit",{},adminToken);assert.equal(journal.data.data.filter(x=>x.action==="ENROLLED"&&x.round_id===round&&x.user_id===uid).length,1);assert.equal(journal.data.data.filter(x=>x.action==="ROUND_CREATED"&&x.round_id===round).length,1);
  assert.equal((await adminCall("round-create",{label:"invalid",opens_at:new Date().toISOString(),closes_at:new Date(Date.now()+600000).toISOString(),duration_seconds:60,topic:"x"},adminToken)).status,422);
  const fake=await adminCall("users",{search:e.VPO_TEST_B_EMAIL},adminToken);assert.equal((await adminCall("enrol",{user_id:fake.data.data[0].id,round_id:round},adminToken)).status,409);
  await p.locator("#logout").click();await p.locator("#login").waitFor({state:"visible"});assert.equal((await adminCall("audit",{},adminToken)).status,401);
@@ -72,6 +73,13 @@ async function main(){
  assert.equal((await adminCall("logout",{},guard)).status,200);
  assert.equal((await ctx.request.get(base+"/me")).status(),200);
  console.log("ACTIVE EXAM GUARD PASS: admin suspend/delete denied while student attempt ACTIVE.");
+ async function resetCall(route,body){const r=await fetch(base+"/api/reset/"+route,{method:"POST",headers:{Origin:base,"Content-Type":"application/json"},body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});return {status:r.status,data:await r.json()};}
+ const unknown=await resetCall("request",{email:"unknown-"+randomBytes(6).toString("hex")+"@example.test"});assert.equal(unknown.status,202);assert(!fs.existsSync(path.join(e.VPO_TEST_MAIL_DIR,unknown.data.challenge_id+".json")));
+ const request=await resetCall("request",{email});assert.equal(request.status,202);assert(!("code" in request.data));
+ const resetId=request.data.challenge_id,resetMail=JSON.parse(fs.readFileSync(path.join(e.VPO_TEST_MAIL_DIR,resetId+".json"),"utf8")),newPass=randomBytes(24).toString("hex");assert.equal(resetMail.to,email);
+ const resetPayload={challenge_id:resetId,code:resetMail.code,password:newPass};
+ assert.equal((await resetCall("verify",resetPayload)).status,400);assert.equal((await ctx.request.get(base+"/me")).status(),200);
+ console.log("ACTIVE RECOVERY GUARD PASS: valid reset code does not interrupt active attempt.");
  await p.locator("#essay").fill("Synthetic gateway examination essay.");await p.locator("#save").click();await p.waitForFunction(()=>/xác nhận bản #1/.test(document.querySelector("#save-status").textContent));p.once("dialog",d=>d.accept());await p.locator("#submit").click();await p.waitForFunction(()=>document.querySelector("#state").textContent==="SUBMITTED");assert.match(await p.locator("#receipt-output").textContent(),/"seq": 1/);
  await p.goto(base+"/staging");await p.locator("#dashboard").waitFor({state:"visible"});
  await p.locator('a[href="/academy-demo"]').click();await p.waitForURL(base+"/academy-demo");
@@ -81,6 +89,24 @@ async function main(){
  console.log("UNIFIED EXAM/ACADEMY PASS: enrolled synthetic student, save/receipt, course and completion through gateway.");
  await p.goto(base+"/staging");await p.locator("#login-panel").waitFor({state:"visible"});
  assert.equal((await ctx.request.get(base+"/me")).status(),401);
+ async function studentLogin(password){const r=await fetch(base+"/auth/login",{method:"POST",headers:{Origin:base,"Content-Type":"application/json"},body:JSON.stringify({email,password})});return {status:r.status,cookie:r.headers.get("set-cookie")};}
+ const before=await studentLogin(pass);assert.equal(before.status,200);const prior=before.cookie.split(";")[0];
+ assert.equal((await resetCall("verify",{...resetPayload,code:resetMail.code==="00000000"?"11111111":"00000000"})).status,400);
+ await p.goto(base+"/reset");await p.locator("#challenge").fill(resetId);await p.locator("#code").fill(resetMail.code);await p.locator("#newpass").fill(newPass);await postClick("#verify","/api/reset/verify",200);await p.getByText("Đã khôi phục mật khẩu mẫu.",{exact:false}).waitFor();
+ assert.equal((await resetCall("verify",resetPayload)).status,400);
+ assert.equal((await fetch(base+"/me",{headers:{Cookie:prior}})).status,401);assert.equal((await studentLogin(pass)).status,401);assert.equal((await studentLogin(newPass)).status,200);
+ assert(!fs.existsSync(path.join(e.VPO_TEST_MAIL_DIR,resetId+".json")));
+ // Explicit negative cases on synthetic accounts only.
+ const unverified=await resetCall("request",{email:e.VPO_TEST_B_EMAIL});assert.equal(unverified.status,202);assert(!fs.existsSync(path.join(e.VPO_TEST_MAIL_DIR,unverified.data.challenge_id+".json")));
+ assert.deepEqual(Object.keys(unknown.data).sort(),Object.keys(request.data).sort());
+ const registrationMail=JSON.parse(fs.readFileSync(path.join(e.VPO_TEST_MAIL_DIR,probeResult.challenge_id+".json"),"utf8"));
+ assert.equal((await resetCall("verify",{challenge_id:probeResult.challenge_id,code:registrationMail.code,password:newPass})).status,400);
+ const next=await resetCall("request",{email});assert.equal(next.status,202);
+ const nextId=next.data.challenge_id,nextMail=JSON.parse(fs.readFileSync(path.join(e.VPO_TEST_MAIL_DIR,nextId+".json"),"utf8"));
+ const wrong=nextMail.code==="00000000"?"11111111":"00000000";
+ for(let i=0;i<5;i++)assert.equal((await resetCall("verify",{challenge_id:nextId,code:wrong,password:newPass})).status,400);
+ assert.equal((await resetCall("verify",{challenge_id:nextId,code:nextMail.code,password:newPass})).status,400);
+ console.log("SYNTHETIC RECOVERY PASS: generic request, cross-purpose and unverified denial, five-attempt cap, wrong/replayed code denied, browser reset, old session/password rejected.");
  assert.deepEqual(errors,[]);
  console.log("UNIFIED PORTAL PASS: ten public pages, My VPO navigation, browser OTP registration, student login, admin search/logout, separated student session, blocked unknown paths/origin.");
  }finally{await b.close();}

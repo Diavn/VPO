@@ -6,7 +6,7 @@ if(!(e.CODESPACES==="true"||e.GITHUB_ACTIONS==="true")||!/^s1:[a-f0-9]{32}:[a-f0
 const url=new URL(e.DATABASE_URL);if(url.hostname!=="127.0.0.1"||url.port!=="5432"||url.username!=="vpo_accounts"||url.pathname!=="/vpo_ci"||url.protocol!=="postgresql:"||url.search||url.hash)throw Error("Disposable DB only");
 if(!fs.statSync(mailDir).isDirectory()||(fs.statSync(mailDir).mode&0o077)!==0)throw Error("Private synthetic mailbox required");
 const db=new Pool({connectionString:e.DATABASE_URL,max:4,statement_timeout:5000,connectionTimeoutMillis:3000});
-const assets={"/":["admin.html","text/html"],"/admin/":["admin.html","text/html"],"/register/":["register.html","text/html"],"/admin":["admin.html","text/html"],"/register":["register.html","text/html"],"/accounts.js":["accounts.js","text/javascript"],"/accounts.css":["accounts.css","text/css"]};
+const assets={"/":["admin.html","text/html"],"/admin/":["admin.html","text/html"],"/register/":["register.html","text/html"],"/reset":["reset.html","text/html"],"/admin":["admin.html","text/html"],"/register":["register.html","text/html"],"/accounts.js":["accounts.js","text/javascript"],"/accounts.css":["accounts.css","text/css"]};
 const sessions=new Map(),limits=new Map();let hashing=0,requests=0,windowStart=Date.now();
 const fail=(status,code)=>Object.assign(Error(code),{status,code});
 const exact=(b,keys)=>b&&typeof b==="object"&&!Array.isArray(b)&&Object.keys(b).sort().join(",")===keys;
@@ -16,13 +16,13 @@ function send(res,status,data,type="application/json"){res.writeHead(status,{"Co
 async function body(req){if(req.headers["content-type"]!=="application/json"||req.headers["content-encoding"])throw fail(415,"JSON_REQUIRED");const max=req.url==="/api/admin/round-create"?65536:4096;if(Number(req.headers["content-length"]||0)>max)throw fail(413,"TOO_LARGE");const chunks=[];let n=0;for await(const ch of req){n+=ch.length;if(n>max)throw fail(413,"TOO_LARGE");chunks.push(ch);}try{return JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(Buffer.concat(chunks)));}catch{throw fail(400,"JSON_INVALID");}}
 async function hash(p){if(hashing>=2)throw fail(503,"TRY_LATER");hashing++;try{return await S.hashPassword(p);}finally{hashing--;}}
 function admin(req){const raw=req.headers.authorization||"";if(!/^Bearer [a-f0-9]{64}$/.test(raw))throw fail(401,"ADMIN_REQUIRED");const k=S.digest(raw.slice(7)),expiry=sessions.get(k);if(!expiry||expiry<=Date.now()){sessions.delete(k);throw fail(401,"ADMIN_REQUIRED");}return k;}
-async function begin(email){if(!S.validEmail(email))throw fail(422,"SYNTHETIC_EMAIL_REQUIRED");limit("email:"+email,3);const id=crypto.randomUUID(),code=String(crypto.randomInt(0,100000000)).padStart(8,"0");
- const r=await db.query("SELECT vpo_stage.registration_begin($1,$2,$3) AS ok",[id,email,mac(id,code)]);
- if(r.rows[0].ok){fs.writeFileSync(path.join(mailDir,id+".json"),JSON.stringify({to:email,subject:"VPO synthetic verification",challenge_id:id,code,expires_in_seconds:600}),{mode:0o600,flag:"wx"});}
+async function begin(email,recovery=false){if(!S.validEmail(email))throw fail(422,"SYNTHETIC_EMAIL_REQUIRED");limit((recovery?"reset-email:":"email:")+email,3);const id=crypto.randomUUID(),code=String(crypto.randomInt(0,100000000)).padStart(8,"0");
+ const r=await db.query(recovery?"SELECT vpo_stage.password_reset_begin($1,$2,$3) AS ok":"SELECT vpo_stage.registration_begin($1,$2,$3) AS ok",[id,email,mac(id,code)]);
+ if(r.rows[0].ok){fs.writeFileSync(path.join(mailDir,id+".json"),JSON.stringify({to:email,subject:recovery?"VPO synthetic password reset":"VPO synthetic verification",challenge_id:id,code,expires_in_seconds:600}),{mode:0o600,flag:"wx"});}
  return {challenge_id:id,message:"If eligible, verification code is sent to the synthetic mailbox.",mode:"synthetic-mailbox"};
 }
 async function readiness(){
- const names=["registration_begin(uuid,text,text)","registration_finish(uuid,text,text)","account_admin_list(text)","account_admin_change(uuid,text)","admin_overview()","admin_rounds()","admin_create_round(text,timestamptz,timestamptz,integer,text)","admin_enrol(uuid,uuid)","admin_audit()"].map(x=>"vpo_stage."+x);
+ const names=["registration_begin(uuid,text,text)","registration_finish(uuid,text,text)","account_admin_list(text)","account_admin_change(uuid,text)","admin_overview()","admin_rounds()","admin_create_round(uuid,text,timestamptz,timestamptz,integer,text)","password_reset_begin(uuid,text,text)","password_reset_finish(uuid,text,text)","admin_enrol(uuid,uuid)","admin_audit()"].map(x=>"vpo_stage."+x);
  const who=await db.query("SELECT session_user AS role,current_database() AS name,(SELECT count(*)::int FROM unnest($1::text[]) AS x(n) WHERE to_regprocedure(n) IS NULL OR NOT has_function_privilege(current_user,to_regprocedure(n),'EXECUTE')) AS missing",[names]);
  if(who.rows[0].role!=="vpo_accounts"||who.rows[0].name!=="vpo_ci"||who.rows[0].missing!==0)throw Error("Account schema or role incomplete");
 }
@@ -42,6 +42,8 @@ async function main(){
  if(req.url==="/api/admin/login"){limit("admin-login",5);if(!exact(b,"password,username")||b.username!=="admin"||!S.validPassword(b.password))throw fail(401,"INVALID_CREDENTIALS");if(hashing>=2)throw fail(503,"TRY_LATER");hashing++;let ok;try{ok=await S.verifyPassword(b.password,adminHash);}finally{hashing--;}if(!ok)throw fail(401,"INVALID_CREDENTIALS");sessions.clear();const token=S.hex(32);sessions.set(S.digest(token),now+1800000);return send(res,200,{token,expires_in_seconds:1800});}
  if(req.url==="/api/register/request"){if(!exact(b,"email"))throw fail(422,"INPUT");return send(res,202,await begin(b.email));}
  if(req.url==="/api/register/verify"){limit("verify-global",40);if(!exact(b,"challenge_id,code,password")||!P.uuid(b.challenge_id)||typeof b.code!=="string"||!/^\d{8}$/.test(b.code)||!S.validPassword(b.password))throw fail(422,"INPUT");limit("verify:"+b.challenge_id,6);const r=await db.query("SELECT vpo_stage.registration_finish($1,$2,$3) AS ok",[b.challenge_id,mac(b.challenge_id,b.code),await hash(b.password)]);if(!r.rows[0].ok)throw fail(400,"INVALID_OR_EXPIRED_CODE");fs.rmSync(path.join(mailDir,b.challenge_id+".json"),{force:true});return send(res,201,{status:"ACTIVE"});}
+ if(req.url==="/api/reset/request"){limit("reset-request-global",30);if(!exact(b,"email"))throw fail(422,"INPUT");return send(res,202,await begin(b.email,true));}
+ if(req.url==="/api/reset/verify"){limit("reset-verify-global",30);if(!exact(b,"challenge_id,code,password")||!P.uuid(b.challenge_id)||typeof b.code!=="string"||!/^\d{8}$/.test(b.code)||!S.validPassword(b.password))throw fail(422,"INPUT");limit("reset:"+b.challenge_id,6);const r=await db.query("SELECT vpo_stage.password_reset_finish($1,$2,$3) AS ok",[b.challenge_id,mac(b.challenge_id,b.code),await hash(b.password)]);if(!r.rows[0].ok)throw fail(400,"RESET_REFUSED");fs.rmSync(path.join(mailDir,b.challenge_id+".json"),{force:true});return send(res,200,{status:"RESET"});}
  if(req.url.startsWith("/api/admin/")){
  const k=admin(req);
  if(req.url==="/api/admin/overview"&&exact(b,""))return send(res,200,{data:(await db.query("SELECT vpo_stage.admin_overview() AS data")).rows[0].data});
@@ -49,9 +51,9 @@ async function main(){
  if(req.url==="/api/admin/audit"&&exact(b,""))return send(res,200,{data:(await db.query("SELECT vpo_stage.admin_audit() AS data")).rows[0].data});
  if(req.url==="/api/admin/round-create"){
   const date=x=>typeof x==="string"&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(x)&&Number.isFinite(Date.parse(x))&&new Date(x).toISOString()===x;
-  if(!exact(b,"closes_at,duration_seconds,label,opens_at,topic")||typeof b.label!=="string"||!b.label.startsWith("DEMO ")||b.label.length>120||!date(b.opens_at)||!date(b.closes_at)||!Number.isInteger(b.duration_seconds)||b.duration_seconds<60||b.duration_seconds>14400||typeof b.topic!=="string"||!b.topic.trim()||Buffer.byteLength(b.topic)>8000)throw fail(422,"ROUND_INPUT");
-  const id=(await db.query("SELECT vpo_stage.admin_create_round($1,$2,$3,$4,$5) AS id",[b.label,b.opens_at,b.closes_at,b.duration_seconds,b.topic])).rows[0].id;
-  if(!id)throw fail(422,"ROUND_REFUSED");return send(res,201,{id});
+  if(!exact(b,"closes_at,duration_seconds,label,op_id,opens_at,topic")||!P.uuid(b.op_id)||typeof b.label!=="string"||!b.label.startsWith("DEMO ")||b.label.length>120||!date(b.opens_at)||!date(b.closes_at)||!Number.isInteger(b.duration_seconds)||b.duration_seconds<60||b.duration_seconds>14400||typeof b.topic!=="string"||!b.topic.trim()||Buffer.byteLength(b.topic)>8000)throw fail(422,"ROUND_INPUT");
+  const r=(await db.query("SELECT vpo_stage.admin_create_round($1,$2,$3,$4,$5,$6) AS data",[b.op_id,b.label,b.opens_at,b.closes_at,b.duration_seconds,b.topic])).rows[0].data;
+  if(r.result==="REFUSED")throw fail(422,"ROUND_REFUSED");if(r.result==="CONFLICT")throw fail(409,"ROUND_OP_CONFLICT");return send(res,r.result==="REPLAY"?200:201,r);
  }
  if(req.url==="/api/admin/enrol"){
   if(!exact(b,"round_id,user_id")||!P.uuid(b.round_id)||!P.uuid(b.user_id))throw fail(422,"INPUT");
