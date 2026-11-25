@@ -14,6 +14,7 @@ async function main(){
   await p.goto(base+"/staging?utm_source=chatgpt.com");await p.waitForFunction(()=>!document.querySelector("#login").disabled);
   async function login(email,password){await p.locator("#email").fill(email);await p.locator("#password").fill(password);await p.locator("#login").click();await p.locator("#dashboard").waitFor({state:"visible"});assert.match(await p.locator("#profile").innerText(),/DEMO-/);return p.locator("#profile dd").first().textContent();}
   const a=await login(e.VPO_TEST_A_EMAIL,e.VPO_TEST_A_PASSWORD);
+  const roundsA=await context.request.get(base+"/me/rounds");assert.equal(roundsA.status(),200);const own=(await roundsA.json()).data;assert(own.length>0);assert(own.every(v=>!("topic" in v)&&!("topic_snapshot" in v)));
   assert.equal(await p.locator("a[href='/exam-demo']").count(),1);assert.equal(await p.locator("a[href='/academy-demo']").count(),1);
   await p.waitForFunction(()=>!document.querySelector("#refresh").disabled);
   const dimensions=await p.evaluate(()=>[document.documentElement.scrollWidth,document.documentElement.clientWidth]);assert(dimensions[0]<=dimensions[1]+2);
@@ -21,6 +22,7 @@ async function main(){
   assert.equal(await p.locator("#profile dd").first().textContent(),a);
   await p.locator("#logout").click();await p.locator("#dashboard").waitFor({state:"hidden"});assert.equal((await context.request.get(base+"/me")).status(),401);
   const b=await login(e.VPO_TEST_B_EMAIL,e.VPO_TEST_B_PASSWORD);assert.notEqual(a,b);
+  const roundsB=await context.request.get(base+"/me/rounds");assert.equal(roundsB.status(),200);const other=(await roundsB.json()).data;assert(!other.some(v=>own.some(x=>x.id===v.id)));console.log("STUDENT ROUND ISOLATION PASS: A/B enrolments remain separate, no exam topic in discovery.");
   await p.locator("#logout").click();await p.locator("#dashboard").waitFor({state:"hidden"});
   assert.equal(errors.length,0);
   console.log("V5.7 staging dashboard: login A/B, distinct profiles, reload, logout and mobile reflow PASS");
