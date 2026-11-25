@@ -12,7 +12,7 @@ esac
 cd "$(dirname "$0")/.."
 for cmd in docker psql node npm openssl curl; do command -v "$cmd" >/dev/null || { echo "Missing $cmd"; exit 1; }; done
 [[ "$(node -p 'process.versions.node.split(".")[0]')" == 22 ]] || { echo 'Node 22 required'; exit 1; }
-for port in 5432 8080; do
+for port in 5432 8080 8082; do
  if (echo >/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then echo "Port $port occupied; refusing to touch existing services"; exit 1; fi
 done
 export VPO_MODE=synthetic-staging VPO_PORT=8080 VPO_ORIGIN=http://localhost:8080
@@ -33,8 +33,10 @@ name="vpo-staging-$(openssl rand -hex 8)"
 tmp="$(mktemp -d)"
 server_pid=""
 desk_pid=""
+accounts_pid=""
 container_id=""
 cleanup(){
+ if [[ -n "$accounts_pid" ]]; then kill "$accounts_pid" 2>/dev/null || true; wait "$accounts_pid" 2>/dev/null || true; fi
  if [[ -n "$desk_pid" ]]; then kill "$desk_pid" 2>/dev/null || true; wait "$desk_pid" 2>/dev/null || true; fi
  if [[ -n "$server_pid" ]]; then kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true; fi
  if [[ -n "$container_id" ]]; then docker stop "$container_id" >/dev/null 2>&1 || true; fi
@@ -52,7 +54,7 @@ done
 [[ "$(psql -XAt -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_namespace WHERE nspname='vpo_stage'")" == 0 ]]
 npm install --ignore-scripts --no-audit --no-fund
 declare -A pass
-roles=(vpo_migrator vpo_runtime vpo_provision ci_exam_a ci_exam_b ci_moderator ci_approver ci_publisher ci_finance ci_appeal ci_cert ci_cert_approver ci_mentor_a ci_mentor_b)
+roles=(vpo_migrator vpo_runtime vpo_provision vpo_accounts ci_exam_a ci_exam_b ci_moderator ci_approver ci_publisher ci_finance ci_appeal ci_cert ci_cert_approver ci_mentor_a ci_mentor_b)
 for role in "${roles[@]}"; do
  pass[$role]="$(openssl rand -hex 24)"
  if [[ "${GITHUB_ACTIONS:-}" == true ]]; then echo "::add-mask::${pass[$role]}"; fi
@@ -68,7 +70,7 @@ GRANT CREATE ON DATABASE vpo_ci TO vpo_migrator;
 SQL
 dburl(){ printf 'postgresql://%s:%s@127.0.0.1:5432/vpo_ci' "$1" "${pass[$1]}"; }
 owner(){ PGUSER=vpo_migrator PGPASSWORD="${pass[vpo_migrator]}" psql -X -v ON_ERROR_STOP=1 "$@"; }
-for migration in schema.sql grants.sql exam-schema.sql workflow-schema.sql workflow-functions.sql academy-schema.sql academy-functions.sql integrity.sql security-hardening.sql; do
+for migration in schema.sql grants.sql exam-schema.sql workflow-schema.sql workflow-functions.sql academy-schema.sql academy-functions.sql integrity.sql security-hardening.sql account-management.sql; do
  echo "Applying $migration"
  owner -q -f "$migration"
 done
@@ -99,6 +101,35 @@ for i in $(seq 1 30); do
  sleep 1
 done
 curl --noproxy '*' -fsS -H "Host: $host" http://127.0.0.1:8080/healthz >/dev/null
+# Admin password never stored in source, CLI arguments, or the service environment.
+if [[ "$mode" == --check ]]; then
+ admin_password="$(openssl rand -hex 24)"
+ if [[ "${GITHUB_ACTIONS:-}" == true ]]; then echo "::add-mask::$admin_password"; fi
+else
+ read -r -s -p 'Set NEW admin password (at least 15 UTF-8 bytes): ' admin_password; echo
+ read -r -s -p 'Confirm admin password: ' admin_confirm; echo
+ [[ "$admin_password" == "$admin_confirm" ]] || { echo 'Passwords do not match'; exit 1; }
+ unset admin_confirm
+fi
+admin_hash="$(printf '%s' "$admin_password" | node -e 'const S=require("./security.cjs");let p="";process.stdin.setEncoding("utf8");process.stdin.on("data",x=>p+=x);process.stdin.on("end",()=>S.hashPassword(p).then(console.log).catch(()=>{console.error("Password policy refused");process.exitCode=1;}));')"
+mail_dir="$tmp/mail"; mkdir -m 700 "$mail_dir"
+mail_key="$(openssl rand -hex 32)"
+if [[ "${GITHUB_ACTIONS:-}" == true ]]; then echo "::add-mask::$admin_hash"; echo "::add-mask::$mail_key"; fi
+account_origin=http://localhost:8082
+if [[ "$mode" == private ]]; then account_origin="https://${CODESPACE_NAME}-8082.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"; fi
+env -i PATH="$PATH" CODESPACES="${CODESPACES:-}" GITHUB_ACTIONS="${GITHUB_ACTIONS:-}" VPO_MODE=synthetic-staging VPO_ORIGIN="$account_origin" VPO_CSRF_KEY="$(openssl rand -hex 32)" VPO_ADMIN_HASH="$admin_hash" VPO_MAIL_KEY="$mail_key" VPO_MAIL_DIR="$mail_dir" DATABASE_URL="$(dburl vpo_accounts)" node account-client/server.cjs >"$tmp/accounts.log" 2>&1 &
+accounts_pid=$!
+unset admin_hash mail_key
+for i in $(seq 1 30); do
+ if curl --noproxy '*' -fsS -H "Host: ${account_origin#*://}" http://127.0.0.1:8082/register >/dev/null 2>&1; then break; fi
+ kill -0 "$accounts_pid" || { echo 'Account service stopped'; exit 1; }
+ sleep 1
+done
+curl --noproxy '*' -fsS -H "Host: ${account_origin#*://}" http://127.0.0.1:8082/register >/dev/null
+if [[ "$mode" == --check ]]; then
+ VPO_TEST_ADMIN_PASSWORD="$admin_password" VPO_TEST_MAIL_DIR="$mail_dir" node tests/account-management.cjs
+fi
+unset admin_password
 if [[ "$mode" == --check ]]; then
  node tests/staging-integration.cjs
  node tests/integration-smoke.cjs
@@ -121,18 +152,22 @@ if [[ "$mode" == --check ]]; then
  exit 0
 fi
 echo '=== VPO PRIVATE STAGING / SYNTHETIC DATA ONLY ==='
+printf 'Admin: %s/admin (username admin)\nRegistration: %s/register\nKeep port 8082 Private too.\n' "$account_origin" "$account_origin"
 printf 'Dashboard: %s/staging\nExam: %s/exam-demo\nAcademy: %s/academy-demo\n' "$VPO_ORIGIN" "$VPO_ORIGIN" "$VPO_ORIGIN"
 printf 'A (enrolled): %s\nPassword A: %s\nB (not enrolled): %s\nPassword B: %s\nRound UUID: %s\n' "$VPO_TEST_A_EMAIL" "$VPO_TEST_A_PASSWORD" "$VPO_TEST_B_EMAIL" "$VPO_TEST_B_PASSWORD" "$VPO_TEST_ROUND"
 echo 'Passwords are generated for this run only. Do not share terminal screenshots or real data.'
 echo 'Keep the port Private. Ctrl+C stops this instance and deletes its disposable database.'
 # Optional owner-operated synthetic staff console. One human may simulate roles;
 # role-separated DB credentials stay in this process; no independent human sign-off.
-echo 'Operator commands: seed | staff ROLE OP [UUID] | desk ROLE | desk-stop | quit'
+echo 'Operator commands: seed | staff ROLE OP [UUID] | desk ROLE | desk-stop | mail UUID | quit'
 echo 'For staff mutations, enter JSON on the next line (or {} for no arguments).'
 while kill -0 "$server_pid" 2>/dev/null; do
  read -r -p 'VPO mock> ' cmd role action obj extra || break
  case "$cmd" in
  quit) break;;
+ mail)
+  [[ "$role" =~ ^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$ && -z "$action$obj$extra" ]] || { echo 'Usage: mail UUID'; continue; }
+  if [[ -f "$mail_dir/$role.json" ]]; then cat "$mail_dir/$role.json"; echo; else echo 'No matching synthetic message'; fi;;
  desk-stop)
   if [[ -n "$desk_pid" ]]; then kill "$desk_pid" 2>/dev/null || true; wait "$desk_pid" 2>/dev/null || true; desk_pid=""; fi;;
  desk)
@@ -168,6 +203,6 @@ SQL
   read -r -p 'JSON payload: ' payload || break
   args=("$action"); [[ -z "$obj" ]] || args+=("$obj")
   printf '%s\n' "$payload" | env -u PGPASSWORD -u VPO_TEST_A_PASSWORD -u VPO_TEST_B_PASSWORD DATABASE_URL="$(dburl "$role")" node workflow-cli.cjs "${args[@]}" || echo 'Operation refused (check role/state/input).';;
- *) echo 'Commands: seed | staff ROLE OP [UUID] | desk ROLE | desk-stop | quit';;
+ *) echo 'Commands: seed | staff ROLE OP [UUID] | desk ROLE | desk-stop | mail UUID | quit';;
  esac
 done
