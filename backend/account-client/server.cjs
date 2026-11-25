@@ -5,6 +5,7 @@ const e=process.env,c=S.config({...e,VPO_PORT:"8082"}),adminHash=e.VPO_ADMIN_HAS
 if(!(e.CODESPACES==="true"||e.GITHUB_ACTIONS==="true")||!/^s1:[a-f0-9]{32}:[a-f0-9]{128}$/.test(adminHash||"")||! /^[a-f0-9]{64}$/.test(mailKey||"")||!mailDir)throw Error("Synthetic configuration required");
 const url=new URL(e.DATABASE_URL);if(url.hostname!=="127.0.0.1"||url.port!=="5432"||url.username!=="vpo_accounts"||url.pathname!=="/vpo_ci"||url.protocol!=="postgresql:"||url.search||url.hash)throw Error("Disposable DB only");
 if(!fs.statSync(mailDir).isDirectory()||(fs.statSync(mailDir).mode&0o077)!==0)throw Error("Private synthetic mailbox required");
+const mail=require("./synthetic-mail.cjs").mailbox(mailDir);
 const db=new Pool({connectionString:e.DATABASE_URL,max:4,statement_timeout:5000,connectionTimeoutMillis:3000});
 const assets={"/":["admin.html","text/html"],"/admin/":["admin.html","text/html"],"/register/":["register.html","text/html"],"/reset":["reset.html","text/html"],"/admin":["admin.html","text/html"],"/register":["register.html","text/html"],"/accounts.js":["accounts.js","text/javascript"],"/accounts.css":["accounts.css","text/css"]};
 const sessions=new Map(),limits=new Map();let hashing=0,requests=0,windowStart=Date.now();
@@ -18,7 +19,7 @@ async function hash(p){if(hashing>=2)throw fail(503,"TRY_LATER");hashing++;try{r
 function admin(req){const raw=req.headers.authorization||"";if(!/^Bearer [a-f0-9]{64}$/.test(raw))throw fail(401,"ADMIN_REQUIRED");const k=S.digest(raw.slice(7)),expiry=sessions.get(k);if(!expiry||expiry<=Date.now()){sessions.delete(k);throw fail(401,"ADMIN_REQUIRED");}return k;}
 async function begin(email,recovery=false){if(!S.validEmail(email))throw fail(422,"SYNTHETIC_EMAIL_REQUIRED");limit((recovery?"reset-email:":"email:")+email,3);const id=crypto.randomUUID(),code=String(crypto.randomInt(0,100000000)).padStart(8,"0");
  const r=await db.query(recovery?"SELECT vpo_stage.password_reset_begin($1,$2,$3) AS ok":"SELECT vpo_stage.registration_begin($1,$2,$3) AS ok",[id,email,mac(id,code)]);
- if(r.rows[0].ok){fs.writeFileSync(path.join(mailDir,id+".json"),JSON.stringify({to:email,subject:recovery?"VPO synthetic password reset":"VPO synthetic verification",challenge_id:id,code,expires_in_seconds:600}),{mode:0o600,flag:"wx"});}
+ if(r.rows[0].ok){mail.deliver({to:email,subject:recovery?"VPO synthetic password reset":"VPO synthetic verification",challenge_id:id,code,expires_in_seconds:600});}
  return {challenge_id:id,message:"If eligible, verification code is sent to the synthetic mailbox.",mode:"synthetic-mailbox"};
 }
 async function readiness(){
@@ -28,6 +29,7 @@ async function readiness(){
 }
 async function main(){
  await readiness();
+ const purge=setInterval(()=>{try{mail.purge();}catch{console.error("Synthetic mailbox expiry cleanup failed");}},60000);purge.unref();
  const server=http.createServer({requestTimeout:10000,headersTimeout:5000,maxHeaderSize:8192},async(req,res)=>{
  try{
  if(!S.hostAllowed(req.headers.host,c)){console.error("HOST_REJECTED",JSON.stringify(String(req.headers.host||"").slice(0,180)));throw fail(421,"HOST");}
@@ -41,9 +43,9 @@ async function main(){
  const b=await body(req);
  if(req.url==="/api/admin/login"){limit("admin-login",5);if(!exact(b,"password,username")||b.username!=="admin"||!S.validPassword(b.password))throw fail(401,"INVALID_CREDENTIALS");if(hashing>=2)throw fail(503,"TRY_LATER");hashing++;let ok;try{ok=await S.verifyPassword(b.password,adminHash);}finally{hashing--;}if(!ok)throw fail(401,"INVALID_CREDENTIALS");sessions.clear();const token=S.hex(32);sessions.set(S.digest(token),now+1800000);return send(res,200,{token,expires_in_seconds:1800});}
  if(req.url==="/api/register/request"){if(!exact(b,"email"))throw fail(422,"INPUT");return send(res,202,await begin(b.email));}
- if(req.url==="/api/register/verify"){limit("verify-global",40);if(!exact(b,"challenge_id,code,password")||!P.uuid(b.challenge_id)||typeof b.code!=="string"||!/^\d{8}$/.test(b.code)||!S.validPassword(b.password))throw fail(422,"INPUT");limit("verify:"+b.challenge_id,6);const r=await db.query("SELECT vpo_stage.registration_finish($1,$2,$3) AS ok",[b.challenge_id,mac(b.challenge_id,b.code),await hash(b.password)]);if(!r.rows[0].ok)throw fail(400,"INVALID_OR_EXPIRED_CODE");fs.rmSync(path.join(mailDir,b.challenge_id+".json"),{force:true});return send(res,201,{status:"ACTIVE"});}
+ if(req.url==="/api/register/verify"){limit("verify-global",40);if(!exact(b,"challenge_id,code,password")||!P.uuid(b.challenge_id)||typeof b.code!=="string"||!/^\d{8}$/.test(b.code)||!S.validPassword(b.password))throw fail(422,"INPUT");limit("verify:"+b.challenge_id,6);const r=await db.query("SELECT vpo_stage.registration_finish($1,$2,$3) AS ok",[b.challenge_id,mac(b.challenge_id,b.code),await hash(b.password)]);if(!r.rows[0].ok)throw fail(400,"INVALID_OR_EXPIRED_CODE");try{mail.remove(b.challenge_id);}catch{console.error("Synthetic mailbox cleanup failed");}return send(res,201,{status:"ACTIVE"});}
  if(req.url==="/api/reset/request"){limit("reset-request-global",30);if(!exact(b,"email"))throw fail(422,"INPUT");return send(res,202,await begin(b.email,true));}
- if(req.url==="/api/reset/verify"){limit("reset-verify-global",30);if(!exact(b,"challenge_id,code,password")||!P.uuid(b.challenge_id)||typeof b.code!=="string"||!/^\d{8}$/.test(b.code)||!S.validPassword(b.password))throw fail(422,"INPUT");limit("reset:"+b.challenge_id,6);const r=await db.query("SELECT vpo_stage.password_reset_finish($1,$2,$3) AS ok",[b.challenge_id,mac(b.challenge_id,b.code),await hash(b.password)]);if(!r.rows[0].ok)throw fail(400,"RESET_REFUSED");fs.rmSync(path.join(mailDir,b.challenge_id+".json"),{force:true});return send(res,200,{status:"RESET"});}
+ if(req.url==="/api/reset/verify"){limit("reset-verify-global",30);if(!exact(b,"challenge_id,code,password")||!P.uuid(b.challenge_id)||typeof b.code!=="string"||!/^\d{8}$/.test(b.code)||!S.validPassword(b.password))throw fail(422,"INPUT");limit("reset:"+b.challenge_id,6);const r=await db.query("SELECT vpo_stage.password_reset_finish($1,$2,$3) AS ok",[b.challenge_id,mac(b.challenge_id,b.code),await hash(b.password)]);if(!r.rows[0].ok)throw fail(400,"RESET_REFUSED");try{mail.remove(b.challenge_id);}catch{console.error("Synthetic mailbox cleanup failed");}return send(res,200,{status:"RESET"});}
  if(req.url.startsWith("/api/admin/")){
  const k=admin(req);
  if(req.url==="/api/admin/overview"&&exact(b,""))return send(res,200,{data:(await db.query("SELECT vpo_stage.admin_overview() AS data")).rows[0].data});
@@ -68,6 +70,6 @@ async function main(){
  throw fail(404,"NOT_FOUND");
  }catch(err){if(!res.headersSent&&!res.destroyed)send(res,err.status||500,{error:err.status?err.code:"REQUEST_FAILED"});}
  });
- server.listen(8082,"127.0.0.1",()=>console.log("Synthetic account service ready"));server.on("error",()=>process.exit(1));process.on("SIGTERM",()=>{server.close(()=>db.end().finally(()=>process.exit(0)));setTimeout(()=>process.exit(1),5000).unref();});
+ server.listen(8082,"127.0.0.1",()=>console.log("Synthetic account service ready"));server.on("error",()=>process.exit(1));process.on("SIGTERM",()=>{clearInterval(purge);server.close(()=>db.end().finally(()=>process.exit(0)));setTimeout(()=>process.exit(1),5000).unref();});
 }
 main().catch(()=>{console.error("Account service startup refused");process.exit(1);});
