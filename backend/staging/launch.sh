@@ -15,7 +15,7 @@ for cmd in docker psql node npm openssl curl; do command -v "$cmd" >/dev/null ||
 for port in 5432 8080 8082; do
  if (echo >/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then echo "Port $port occupied; refusing to touch existing services"; exit 1; fi
 done
-export VPO_MODE=synthetic-staging VPO_PORT=8080 VPO_ORIGIN=http://localhost:8080
+export VPO_MODE=synthetic-staging VPO_PORT=8080 VPO_ORIGIN=http://localhost:8080 VPO_CODESPACES_PROXY=no
 if [[ "$mode" != --check ]]; then
  echo 'Keep forwarded ports 8080, 8082 Private (8081 only for local staff desk). Do not forward PostgreSQL (5432).'
  read -r -p 'Type PRIVATE to confirm: ' confirmation
@@ -23,6 +23,7 @@ if [[ "$mode" != --check ]]; then
 fi
 if [[ "$mode" == private ]]; then
  [[ "${CODESPACE_NAME:-}" =~ ^[a-zA-Z0-9-]+$ && "${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}" =~ ^[a-zA-Z0-9.-]+$ ]] || { echo 'Cannot derive exact Codespaces origin'; exit 1; }
+ export VPO_CODESPACES_PROXY=yes
  export VPO_ORIGIN="https://${CODESPACE_NAME}-8080.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
 fi
 export VPO_CSRF_KEY="$(openssl rand -hex 32)"
@@ -117,7 +118,7 @@ mail_key="$(openssl rand -hex 32)"
 if [[ "${GITHUB_ACTIONS:-}" == true ]]; then echo "::add-mask::$admin_hash"; echo "::add-mask::$mail_key"; fi
 account_origin=http://localhost:8082
 if [[ "$mode" == private ]]; then account_origin="https://${CODESPACE_NAME}-8082.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"; fi
-env -i PATH="$PATH" CODESPACES="${CODESPACES:-}" GITHUB_ACTIONS="${GITHUB_ACTIONS:-}" VPO_MODE=synthetic-staging VPO_ORIGIN="$account_origin" VPO_CSRF_KEY="$(openssl rand -hex 32)" VPO_ADMIN_HASH="$admin_hash" VPO_MAIL_KEY="$mail_key" VPO_MAIL_DIR="$mail_dir" DATABASE_URL="$(dburl vpo_accounts)" node account-client/server.cjs >"$tmp/accounts.log" 2>&1 &
+env -i PATH="$PATH" CODESPACES="${CODESPACES:-}" GITHUB_ACTIONS="${GITHUB_ACTIONS:-}" VPO_MODE=synthetic-staging VPO_ORIGIN="$account_origin" VPO_CODESPACES_PROXY="$VPO_CODESPACES_PROXY" CODESPACE_NAME="${CODESPACE_NAME:-}" GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}" VPO_CSRF_KEY="$(openssl rand -hex 32)" VPO_ADMIN_HASH="$admin_hash" VPO_MAIL_KEY="$mail_key" VPO_MAIL_DIR="$mail_dir" DATABASE_URL="$(dburl vpo_accounts)" node account-client/server.cjs >"$tmp/accounts.log" 2>&1 &
 accounts_pid=$!
 unset admin_hash mail_key
 for i in $(seq 1 30); do
@@ -159,12 +160,14 @@ echo 'Passwords are generated for this run only. Do not share terminal screensho
 echo 'Keep the port Private. Ctrl+C stops this instance and deletes its disposable database.'
 # Optional owner-operated synthetic staff console. One human may simulate roles;
 # role-separated DB credentials stay in this process; no independent human sign-off.
-echo 'Operator commands: seed | staff ROLE OP [UUID] | desk ROLE | desk-stop | mail UUID | quit'
+echo 'Operator commands: seed | staff ROLE OP [UUID] | desk ROLE | desk-stop | mail UUID | diagnose | quit'
 echo 'For staff mutations, enter JSON on the next line (or {} for no arguments).'
 while kill -0 "$server_pid" 2>/dev/null; do
  read -r -p 'VPO mock> ' cmd role action obj extra || break
  case "$cmd" in
  quit) break;;
+ diagnose)
+  echo "Recent rejected Host values (no credentials):"; grep -h "^HOST_REJECTED " "$tmp/accounts.log" "$tmp/server.log" | tail -n 10 || true;;
  mail)
   [[ "$role" =~ ^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$ && -z "$action$obj$extra" ]] || { echo 'Usage: mail UUID'; continue; }
   if [[ -f "$mail_dir/$role.json" ]]; then cat "$mail_dir/$role.json"; echo; else echo 'No matching synthetic message'; fi;;
@@ -203,6 +206,6 @@ SQL
   read -r -p 'JSON payload: ' payload || break
   args=("$action"); [[ -z "$obj" ]] || args+=("$obj")
   printf '%s\n' "$payload" | env -u PGPASSWORD -u VPO_TEST_A_PASSWORD -u VPO_TEST_B_PASSWORD DATABASE_URL="$(dburl "$role")" node workflow-cli.cjs "${args[@]}" || echo 'Operation refused (check role/state/input).';;
- *) echo 'Commands: seed | staff ROLE OP [UUID] | desk ROLE | desk-stop | mail UUID | quit';;
+ *) echo 'Commands: seed | staff ROLE OP [UUID] | desk ROLE | desk-stop | mail UUID | diagnose | quit';;
  esac
 done
