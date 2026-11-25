@@ -1,4 +1,4 @@
-name: VPO V6.1 account lifecycle synthetic gate
+name: VPO V6.1.5 master regression gate
 on:
   push:
     branches: [v6.1-account-management]
@@ -15,7 +15,7 @@ jobs:
   fresh-launch:
     if: github.ref == 'refs/heads/v6.1-account-management' || (github.event_name == 'pull_request' && github.head_ref == 'v6.1-account-management' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -26,11 +26,10 @@ jobs:
       - name: Verify shell and JS syntax
         run: |
           bash -n backend/staging/launch.sh
+          bash -n backend/ci/backup-restore-pilot.sh
           find backend -type f \( -name '*.cjs' -o -name '*.js' \) -print0 | xargs -0 -r -n1 node --check
           docker version
           psql --version
-      - name: Verify Host and proxy security policy
-        run: node --test backend/tests/security.test.cjs
       - name: Verify release gate remains closed
         run: |
           node backend/release/check.cjs --check
@@ -44,8 +43,15 @@ jobs:
         run: |
           npm install --ignore-scripts --no-audit --no-fund
           npx --no-install playwright install --with-deps chromium
-      - name: Launch fresh disposable stack and check
+      - name: All unit and public portal tests
+        run: |
+          (cd backend && npm test)
+          node tests/portal-demo.test.cjs
+      - name: Launch full master regression
         run: bash backend/staging/launch.sh --check
+      - name: Dependency vulnerability check (runtime)
+        working-directory: backend
+        run: npm audit --omit=dev --audit-level=high
       - name: Verify disposable container removed
         if: always()
         run: |
