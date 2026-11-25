@@ -167,7 +167,7 @@ while kill -0 "$server_pid" 2>/dev/null; do
  case "$cmd" in
  quit) break;;
  diagnose)
-  echo "Recent rejected Host values (no credentials):"; grep -h "^HOST_REJECTED " "$tmp/accounts.log" "$tmp/server.log" | tail -n 10 || true;;
+  echo "Recent rejected Host and GET route values (no credentials):"; grep -hE "^(HOST_REJECTED|ROUTE_REJECTED) " "$tmp/accounts.log" "$tmp/server.log" | tail -n 10 || true;;
  mail)
   [[ "$role" =~ ^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$ && -z "$action$obj$extra" ]] || { echo 'Usage: mail UUID'; continue; }
   if [[ -f "$mail_dir/$role.json" ]]; then cat "$mail_dir/$role.json"; echo; else echo 'No matching synthetic message'; fi;;
