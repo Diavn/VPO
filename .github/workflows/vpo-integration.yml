@@ -1,0 +1,69 @@
+name: VPO synthetic integration gate
+on:
+  push:
+    branches: [v5.0-integration-gate]
+  pull_request:
+    branches: [v4.7-academy-analytics]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: vpo-synthetic-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  synthetic-integration:
+    if: github.event_name != 'pull_request' || (github.head_ref == 'v5.0-integration-gate' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: vpo_ci
+          POSTGRES_PASSWORD: disposable-ci-only-not-a-secret
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d vpo_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      VPO_CI_DISPOSABLE: "yes"
+      PGPASSWORD: disposable-ci-only-not-a-secret
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - name: Check tools and syntax
+        run: |
+          node --version
+          psql --version
+          bash -n backend/ci/disposable-integration.sh
+          bash -n backend/ci/backup-restore-pilot.sh
+          find backend -type f \( -name '*.cjs' -o -name '*.js' \) -print0 | xargs -0 -r -n1 node --check
+          node tests/portal-demo.test.cjs
+      - name: Install test dependencies (lockfile pending review)
+        working-directory: backend
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Install Chromium for local browser QA
+        working-directory: backend
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Unit tests
+        working-directory: backend
+        run: npm test
+      - name: Synthetic PostgreSQL and HTTP integration
+        env:
+          VPO_BROWSER_TESTS: "yes"
+          VPO_LOAD_RECOVERY_TESTS: "yes"
+        run: bash backend/ci/disposable-integration.sh
+      - name: Dependency vulnerability check
+        working-directory: backend
+        run: npm audit --omit=dev --audit-level=high
