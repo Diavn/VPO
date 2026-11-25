@@ -1,19 +1,19 @@
-name: VPO private staging launch gate
+name: VPO V5.8 synthetic mock acceptance
 on:
   push:
-    branches: [v5.7-private-staging]
+    branches: [v5.8-mock-acceptance]
   pull_request:
-    branches: [v5.0-integration-gate]
+    branches: [v5.7-private-staging]
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: vpo-private-staging-launch
+  group: vpo-mock-acceptance
   cancel-in-progress: true
 jobs:
   fresh-launch:
-    if: github.ref == 'refs/heads/v5.7-private-staging' || (github.event_name == 'pull_request' && github.head_ref == 'v5.7-private-staging' && github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.ref == 'refs/heads/v5.8-mock-acceptance' || (github.event_name == 'pull_request' && github.head_ref == 'v5.8-mock-acceptance' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
