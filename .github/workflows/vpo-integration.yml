@@ -2,11 +2,18 @@ name: VPO synthetic integration gate
 on:
   push:
     branches: [v5.0-integration-gate]
+  pull_request:
+    branches: [v4.7-academy-analytics]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: vpo-synthetic-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   synthetic-integration:
+    if: github.event_name != 'pull_request' || (github.head_ref == 'v5.0-integration-gate' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     services:
