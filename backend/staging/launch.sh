@@ -12,7 +12,9 @@ esac
 cd "$(dirname "$0")/.."
 for cmd in docker psql node npm openssl curl; do command -v "$cmd" >/dev/null || { echo "Missing $cmd"; exit 1; }; done
 [[ "$(node -p 'process.versions.node.split(".")[0]')" == 22 ]] || { echo 'Node 22 required'; exit 1; }
-for port in 5432 8080 8082; do
+ports=(5432 8080 8082)
+[[ "$mode" != --check ]] || ports+=(8081 8090)
+for port in "${ports[@]}"; do
  if (echo >/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then echo "Port $port occupied; refusing to touch existing services"; exit 1; fi
 done
 export VPO_MODE=synthetic-staging VPO_PORT=8080 VPO_ORIGIN=http://localhost:8080 VPO_CODESPACES_PROXY=no
@@ -75,6 +77,7 @@ for migration in schema.sql grants.sql exam-schema.sql workflow-schema.sql workf
  echo "Applying $migration"
  owner -q -f "$migration"
 done
+[[ "$(owner -At -c "SELECT count(*) FROM pg_tables WHERE schemaname='vpo_stage'")" == 34 ]] || { echo "Unexpected schema table count"; exit 1; }
 owner -q <<'SQL'
 INSERT INTO vpo_stage.demo_staff(login_name,role) VALUES
  ('ci_exam_a','examiner'),('ci_exam_b','examiner'),('ci_moderator','moderator'),('ci_approver','approver'),('ci_publisher','publisher'),('ci_finance','finance'),('ci_appeal','appeal_reviewer'),('ci_cert','cert_officer'),('ci_cert_approver','cert_approver');
@@ -120,17 +123,17 @@ account_origin=http://localhost:8082
 if [[ "$mode" == private ]]; then account_origin="https://${CODESPACE_NAME}-8082.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"; fi
 env -i PATH="$PATH" CODESPACES="${CODESPACES:-}" GITHUB_ACTIONS="${GITHUB_ACTIONS:-}" VPO_MODE=synthetic-staging VPO_ORIGIN="$account_origin" VPO_CODESPACES_PROXY="$VPO_CODESPACES_PROXY" CODESPACE_NAME="${CODESPACE_NAME:-}" GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}" VPO_CSRF_KEY="$(openssl rand -hex 32)" VPO_ADMIN_HASH="$admin_hash" VPO_MAIL_KEY="$mail_key" VPO_MAIL_DIR="$mail_dir" DATABASE_URL="$(dburl vpo_accounts)" node account-client/server.cjs >"$tmp/accounts.log" 2>&1 &
 accounts_pid=$!
-unset admin_hash mail_key
+[[ "$mode" == --check ]] || unset admin_hash mail_key
 for i in $(seq 1 30); do
- if curl --noproxy '*' -fsS -H "Host: ${account_origin#*://}" http://127.0.0.1:8082/register >/dev/null 2>&1; then break; fi
+ if curl --noproxy '*' -fsS -H "Host: ${account_origin#*://}" http://127.0.0.1:8082/healthz >/dev/null 2>&1; then break; fi
  kill -0 "$accounts_pid" || { echo 'Account service stopped'; exit 1; }
  sleep 1
 done
-curl --noproxy '*' -fsS -H "Host: ${account_origin#*://}" http://127.0.0.1:8082/register >/dev/null
+curl --noproxy '*' -fsS -H "Host: ${account_origin#*://}" http://127.0.0.1:8082/healthz >/dev/null
 if [[ "$mode" == --check ]]; then
  VPO_TEST_ADMIN_PASSWORD="$admin_password" VPO_TEST_MAIL_DIR="$mail_dir" node tests/account-management.cjs
 fi
-unset admin_password
+[[ "$mode" == --check ]] || unset admin_password
 if [[ "$mode" == --check ]]; then
  node tests/staging-integration.cjs
  node tests/integration-smoke.cjs
@@ -148,8 +151,18 @@ if [[ "$mode" == --check ]]; then
  done
  node tests/workflow-integration.cjs
  node tests/academy-integration.cjs
+ node tests/integrity-integration.cjs
+ node tests/browser-integration.cjs
+ node tests/security-integration.cjs
  node tests/mock-deadline.cjs
- echo 'V5.8 full synthetic mock PASS; human UAT and production acceptance not established.'
+ node tests/load-pilot.cjs
+ # Stop all HTTP writers before proxy simulation and offline restore.
+ kill "$accounts_pid"; wait "$accounts_pid"; accounts_pid=""
+ kill "$server_pid"; wait "$server_pid"; server_pid=""
+ VPO_TEST_ACCOUNTS_DB="$(dburl vpo_accounts)" VPO_TEST_ADMIN_HASH="$admin_hash" VPO_TEST_MAIL_KEY="$mail_key" VPO_TEST_MAIL_DIR="$mail_dir" VPO_TEST_ADMIN_PASSWORD="$admin_password" node tests/proxy-integration.cjs
+ unset admin_hash mail_key admin_password
+ bash ci/backup-restore-pilot.sh
+ echo 'V6.1.5 master regression PASS; synthetic only; real proxy UAT and production acceptance not established.'
  exit 0
 fi
 echo '=== VPO PRIVATE STAGING / SYNTHETIC DATA ONLY ==='
@@ -162,11 +175,14 @@ echo 'Keep the port Private. Ctrl+C stops this instance and deletes its disposab
 # role-separated DB credentials stay in this process; no independent human sign-off.
 echo 'Operator commands: seed | staff ROLE OP [UUID] | desk ROLE | desk-stop | mail UUID | diagnose | quit'
 echo 'For staff mutations, enter JSON on the next line (or {} for no arguments).'
-while kill -0 "$server_pid" 2>/dev/null; do
+while kill -0 "$server_pid" 2>/dev/null && kill -0 "$accounts_pid" 2>/dev/null; do
  read -r -p 'VPO mock> ' cmd role action obj extra || break
  case "$cmd" in
  quit) break;;
  diagnose)
+  echo "Build: $(git rev-parse --short HEAD) (working tree; running code may differ)";
+  printf "Student HTTP: "; curl --noproxy "*" -sS -o /dev/null -w "%{http_code}\\n" -H "Host: $host" http://127.0.0.1:8080/healthz || true
+  printf "Account HTTP: "; curl --noproxy "*" -sS -o /dev/null -w "%{http_code}\\n" -H "Host: ${account_origin#*://}" http://127.0.0.1:8082/healthz || true
   echo "Recent rejected Host, Origin and GET route values (no credentials):"; grep -hE "^(HOST_REJECTED|ORIGIN_REJECTED|ROUTE_REJECTED) " "$tmp/accounts.log" "$tmp/server.log" | tail -n 10 || true;;
  mail)
   [[ "$role" =~ ^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$ && -z "$action$obj$extra" ]] || { echo 'Usage: mail UUID'; continue; }
