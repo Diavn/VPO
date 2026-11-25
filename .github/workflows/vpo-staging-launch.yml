@@ -2,6 +2,9 @@ name: VPO private staging launch gate
 on:
   push:
     branches: [v5.7-private-staging]
+  pull_request:
+    branches: [v5.0-integration-gate]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 permissions:
   contents: read
@@ -10,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   fresh-launch:
-    if: github.ref == 'refs/heads/v5.7-private-staging'
+    if: github.ref == 'refs/heads/v5.7-private-staging' || (github.event_name == 'pull_request' && github.head_ref == 'v5.7-private-staging' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
