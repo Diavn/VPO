@@ -16,3 +16,15 @@ test("config fails closed",()=>{assert.throws(()=>S.config({}));const env={VPO_M
  assert.throws(()=>S.config({...env,VPO_CODESPACES_PROXY:"yes",VPO_ORIGIN:"https://other-space-8082.app.github.dev"}));
  const local=S.config({...env,VPO_ORIGIN:"http://localhost:8082"});assert(S.hostAllowed("localhost:8082",local));assert(!S.hostAllowed("127.0.0.1:8082",local));
  });
+
+test("Codespaces rewritten Origin only with exact target and same-origin browser metadata",()=>{
+ const env={VPO_MODE:"synthetic-staging",VPO_ORIGIN:"https://demo-space-8082.app.github.dev",VPO_PORT:"8082",VPO_CSRF_KEY:"ab".repeat(32),DATABASE_URL:"postgres://localhost/staging",CODESPACES:"true",CODESPACE_NAME:"demo-space",GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:"app.github.dev",VPO_CODESPACES_PROXY:"yes"};
+ const c=S.config(env),strict=S.config({...env,VPO_CODESPACES_PROXY:"no"}),h={host:"localhost:8082",origin:"http://localhost:8082","sec-fetch-site":"same-origin","sec-fetch-mode":"cors","sec-fetch-dest":"empty"};
+ assert(S.originAllowed(h,c));assert(S.originAllowed({...h,origin:c.origin},c));assert(!S.originAllowed(h,strict));
+ for(const origin of ["http://localhost:8080","http://localhost:8082.evil.test","https://evil.test","null",undefined])assert(!S.originAllowed({...h,origin},c));
+ for(const site of ["cross-site","same-site","none",undefined])assert(!S.originAllowed({...h,"sec-fetch-site":site},c));
+ for(const mode of ["navigate","no-cors",undefined])assert(!S.originAllowed({...h,"sec-fetch-mode":mode},c));
+ assert(!S.originAllowed({...h,host:"evil.test"},c));assert(!S.originAllowed({...h,"sec-fetch-dest":"document"},c));
+ assert(!S.originAllowed({...h,origin:undefined,"x-forwarded-origin":c.origin},c));
+ assert.equal(JSON.parse(S.originDiagnostic(h,c)).origin,h.origin);
+});
