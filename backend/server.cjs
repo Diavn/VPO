@@ -2,7 +2,7 @@
 const http=require("node:http");
 const {Pool}=require("pg");
 const S=require("./security.cjs");
-const E=require("./exam.cjs"),P=require("./exam-policy.cjs");
+const E=require("./exam.cjs"),P=require("./exam-policy.cjs"),W=require("./workflow-policy.cjs");
 const fs=require("node:fs"),pathLib=require("node:path");
 const demoAssets=Object.fromEntries([["/exam-demo","exam.html","text/html; charset=utf-8"],["/exam-demo.js","exam.js","text/javascript; charset=utf-8"],["/exam-demo.css","exam.css","text/css; charset=utf-8"]].map(([url,file,type])=>[url,{type,body:fs.readFileSync(pathLib.join(__dirname,"exam-client",file))}]));
 const c=S.config(process.env);
@@ -73,6 +73,39 @@ async function handle(req,res){
    return E.attempt(db,id,a.id,operation,b);
   });
   return reply(res,out.status,out.value);
+ }
+
+ // V4.6 local synthetic student workflow; no staff HTTP routes.
+ const cv=/^\/public\/certificates\/([^/]+)$/.exec(path);
+ if(cv&&req.method==="GET"){
+  await limit("demo-certificate-global",300);
+  if(!W.validToken(cv[1]))throw fail(404,"NOT_FOUND");
+  const r=await q("SELECT vpo_stage.demo_verify_certificate($1) AS value",[cv[1]]);
+  if(!r.rows[0].value)throw fail(404,"NOT_FOUND");
+  return reply(res,200,r.rows[0].value);
+ }
+ const ow=/^\/me\/orders\/([^/]+)\/report$/.exec(path),aw=/^\/me\/results\/([^/]+)\/appeal$/.exec(path);
+ const list=path==="/me/orders"?"orders":path==="/me/results"?"results":null;
+ if((list&&req.method==="GET")||((ow||aw)&&req.method==="POST")){
+  const a=await auth(req);let op=list,obj=null,b={};
+  if(ow||aw){
+   requireCsrf(req,a);obj=(ow||aw)[1];if(!P.uuid(obj))throw fail(404,"NOT_FOUND");
+   b=await body(req);op=ow?"report":"appeal";
+   if(!(ow?W.validateReport(b):W.validateAppeal(b)))throw fail(422,"INVALID_INPUT");
+   await limit("workflow:"+a.id,30);
+  }
+  try{
+   const value=await tx(async db=>{
+    const live=await db.query("SELECT 1 FROM vpo_stage.sessions s JOIN vpo_stage.users u ON u.id=s.user_id JOIN vpo_stage.role_grants g ON g.user_id=u.id WHERE s.token_hash=$1 AND s.user_id=$2 AND s.expires_at>clock_timestamp() AND s.idle_until>clock_timestamp() AND u.status='ACTIVE' AND g.role='student' AND g.revoked_at IS NULL",[a.hash,a.id]);
+    if(!live.rowCount)throw fail(401,"UNAUTHENTICATED");
+    return (await db.query("SELECT vpo_stage.demo_student_action($1,$2,$3::uuid,$4::jsonb) AS value",[a.id,op,obj,JSON.stringify(b)])).rows[0].value;
+   });
+   return reply(res,list?200:201,{mode:"synthetic-staging",data:value});
+  }catch(e){
+   if(e.code==="23505")throw fail(409,"ALREADY_RECORDED");
+   if(e.code==="P0001"){if(e.message==="NOT_FOUND")throw fail(404,"NOT_FOUND");if(e.message==="FORBIDDEN")throw fail(403,"FORBIDDEN");throw fail(409,"WORKFLOW_REJECTED");}
+   throw e;
+  }
  }
  throw fail(404,"NOT_FOUND");
 }
