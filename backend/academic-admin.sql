@@ -66,6 +66,14 @@ BEGIN
  INSERT INTO vpo_stage.account_admin_audit(action,user_id,course_id) VALUES('ACADEMY_ENROLLED',p_uid,p_course);
  RETURN jsonb_build_object('result','CREATED','id',eid);
 END $enrol$;
+CREATE OR REPLACE FUNCTION vpo_stage.admin_audit() RETURNS jsonb
+LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog,vpo_stage AS $audit$
+ SELECT coalesce(jsonb_agg(to_jsonb(z) ORDER BY z.id DESC),'[]'::jsonb) FROM
+ (SELECT a.id,a.action,a.created_at,a.user_id,a.round_id,u.email,r.label AS round_label,a.question_version_id,q.code AS question_code,q.version AS question_version,a.course_id,c.title AS course_title
+ FROM vpo_stage.account_admin_audit a LEFT JOIN vpo_stage.users u ON u.id=a.user_id
+ LEFT JOIN vpo_stage.demo_rounds r ON r.id=a.round_id LEFT JOIN vpo_stage.question_versions q ON q.id=a.question_version_id
+ LEFT JOIN vpo_stage.academy_courses c ON c.id=a.course_id ORDER BY a.id DESC LIMIT 100) z
+$audit$;
 REVOKE ALL ON vpo_stage.question_versions FROM PUBLIC;
 REVOKE ALL ON FUNCTION vpo_stage.question_immutable(),vpo_stage.admin_question_list(),vpo_stage.admin_question_add(uuid,text,integer,text),vpo_stage.admin_round_from_question(uuid,text,timestamptz,timestamptz,integer,uuid),vpo_stage.admin_academy_catalog(),vpo_stage.admin_academy_enrol(uuid,uuid,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION vpo_stage.admin_question_list(),vpo_stage.admin_question_add(uuid,text,integer,text),vpo_stage.admin_round_from_question(uuid,text,timestamptz,timestamptz,integer,uuid),vpo_stage.admin_academy_catalog(),vpo_stage.admin_academy_enrol(uuid,uuid,text) TO vpo_accounts;
