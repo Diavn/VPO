@@ -1,19 +1,19 @@
-name: VPO V6.2 unified portal regression
+name: VPO V6.3 admin center master regression
 on:
   push:
-    branches: [v6.2-unified-portal]
+    branches: [v6.3-admin-center]
   pull_request:
-    branches: [v6.1-account-management]
+    branches: [v6.2-unified-portal]
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: vpo-unified-portal
+  group: vpo-admin-center
   cancel-in-progress: true
 jobs:
   fresh-launch:
-    if: github.ref == 'refs/heads/v6.2-unified-portal' || (github.event_name == 'pull_request' && github.head_ref == 'v6.2-unified-portal' && github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.ref == 'refs/heads/v6.3-admin-center' || (github.event_name == 'pull_request' && github.head_ref == 'v6.3-admin-center' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:

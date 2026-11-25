@@ -11,6 +11,8 @@ async function main(){
  const ok=await fetch(base+"/healthz");assert.equal(ok.status,200);assert.deepEqual(await ok.json(),{mode:"synthetic-staging",student:200,accounts:200});
  for(const p of ["/backend/schema.sql","/.git/config","/VPO/../backend/schema.sql","/VPO/%2e%2e/backend/security.cjs","/api/admin/unknown","/api/action"])assert.equal((await fetch(base+p)).status,404);
  const bad=await fetch(base+"/api/admin/login",{method:"POST",headers:{Origin:"http://foreign.example.test","Content-Type":"application/json"},body:"{}"});assert.equal(bad.status,403);
+ for(const route of ["overview","rounds","audit","round-create","enrol"]){const denied=await fetch(base+"/api/admin/"+route,{method:"POST",headers:{Origin:base,"Content-Type":"application/json"},body:"{}"});assert.equal(denied.status,401);}
+ async function adminCall(route,body,token){const r=await fetch(base+"/api/admin/"+route,{method:"POST",headers:{Origin:base,"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});return {status:r.status,data:await r.json()};}
  // First isolate the HTTP gateway from browser behavior, without consuming a real email.
  const probeEmail="gateway-probe-"+randomBytes(6).toString("hex")+"@example.test";
  const probe=await fetch(base+"/api/register/request",{method:"POST",headers:{Origin:base,"Content-Type":"application/json"},body:JSON.stringify({email:probeEmail})});
@@ -34,21 +36,42 @@ async function main(){
  const id=await p.locator("#challenge").inputValue(),mail=JSON.parse(fs.readFileSync(path.join(e.VPO_TEST_MAIL_DIR,id+".json"),"utf8"));assert.equal(mail.to,email);await p.locator("#code").fill(mail.code);await p.locator("#newpass").fill(pass);await postClick("#verify","/api/register/verify",201);await p.getByText("Tài khoản mẫu đã kích hoạt.",{exact:false}).waitFor();
  await p.goto(base+"/staging");await p.waitForFunction(()=>!document.querySelector("#login").disabled);await p.locator("#email").fill(email);await p.locator("#password").fill(pass);await p.locator("#login").click();await p.locator("#dashboard").waitFor({state:"visible"});
  assert((await ctx.cookies()).some(c=>c.name==="vpo_local_session"&&c.httpOnly));assert.equal((await ctx.request.get(base+"/me")).status(),200);
- await p.goto(base+"/admin");await p.locator("#password").fill(e.VPO_TEST_ADMIN_PASSWORD);await postClick("#signin","/api/admin/login",200);await p.locator("#workspace").waitFor({state:"visible"});await p.locator("#search").fill(email);await p.locator("#find").click();await p.waitForFunction(()=>document.querySelectorAll("#users .user").length===1);await p.getByText(email,{exact:false}).first().waitFor();await p.locator("#logout").click();await p.locator("#login").waitFor({state:"visible"});
+ await p.goto(base+"/admin");await p.locator("#password").fill(e.VPO_TEST_ADMIN_PASSWORD);const adminResponse=await postClick("#signin","/api/admin/login",200),adminToken=(await adminResponse.json()).token;await p.locator("#workspace").waitFor({state:"visible"});
+ assert.equal(await p.locator("#overview .metric").count(),8);
+ await p.locator("#search").fill(email);await p.locator("#find").click();await p.waitForFunction(()=>document.querySelectorAll("#users .user").length===1);await p.locator("#users .user").getByText(email,{exact:false}).waitFor();
+ const dates=await p.evaluate(()=>{function fmt(n){const d=new Date(n);return new Date(n-d.getTimezoneOffset()*60000).toISOString().slice(0,19);}return {open:fmt(Date.now()-30000),close:fmt(Date.now()+600000)};});
+ const label="DEMO admin-created round "+randomBytes(4).toString("hex");
+ await p.locator("#round-label").fill(label);await p.locator("#round-open").fill(dates.open);await p.locator("#round-close").fill(dates.close);await p.locator("#round-duration").fill("180");await p.locator("#round-topic").fill("Synthetic unified question");
+ p.once("dialog",d=>d.accept());const created=await postClick("#create-round","/api/admin/round-create",201);const round=(await created.json()).id;
+ await p.waitForFunction(id=>document.querySelector("#enrol-round").value===id,round);
+ p.once("dialog",d=>d.accept());await postClick("#users button:text-is('Ghi danh')","/api/admin/enrol",201);
+ await p.waitForFunction(()=>document.querySelector("#status").textContent==="Đã ghi danh.");
+ p.once("dialog",d=>d.accept());await postClick("#users button:text-is('Ghi danh')","/api/admin/enrol",200);
+ await p.waitForFunction(()=>document.querySelector("#status").textContent==="Đã ghi danh trước đó.");
+ const users=await adminCall("users",{search:email},adminToken);assert.equal(users.status,200);const uid=users.data.data[0].id;
+ const listed=await adminCall("rounds",{},adminToken);const record=listed.data.data.find(x=>x.id===round);assert.equal(record.enrolments,1);assert(!("topic" in record));
+ const journal=await adminCall("audit",{},adminToken);assert.equal(journal.data.data.filter(x=>x.action==="ENROLLED"&&x.round_id===round&&x.user_id===uid).length,1);assert(journal.data.data.some(x=>x.action==="ROUND_CREATED"&&x.round_id===round));
+ assert.equal((await adminCall("round-create",{label:"invalid",opens_at:new Date().toISOString(),closes_at:new Date(Date.now()+600000).toISOString(),duration_seconds:60,topic:"x"},adminToken)).status,422);
+ const fake=await adminCall("users",{search:e.VPO_TEST_B_EMAIL},adminToken);assert.equal((await adminCall("enrol",{user_id:fake.data.data[0].id,round_id:round},adminToken)).status,409);
+ await p.locator("#logout").click();await p.locator("#login").waitFor({state:"visible"});assert.equal((await adminCall("audit",{},adminToken)).status,401);
+ console.log("ADMIN CENTER PASS: dashboard, browser round creation and verified enrolment, duplicate idempotence, journal and authorization.");
  // Separate admin logout must not remove the student session.
  assert.equal((await ctx.request.get(base+"/me")).status(),200);
- // Explicit synthetic enrolments by fixture owner only, never student self-enrolment.
- const db=new Client({connectionString:e.VPO_CI_OWNER_DB,statement_timeout:10000,connectionTimeoutMillis:3000});let round;
+ // Academy enrolment remains fixture-owner only; exam enrolment was created by Admin UI.
+ const db=new Client({connectionString:e.VPO_CI_OWNER_DB,statement_timeout:10000,connectionTimeoutMillis:3000});
  try{await db.connect();const role=(await db.query("SELECT current_database() AS db,session_user AS role")).rows[0];assert.deepEqual(role,{db:"vpo_ci",role:"vpo_migrator"});
- const uid=(await db.query("SELECT id FROM vpo_stage.users WHERE email=$1 AND email_verified_at IS NOT NULL",[email])).rows[0].id;
- round=(await db.query("INSERT INTO vpo_stage.demo_rounds(label,opens_at,closes_at,duration_seconds,topic) VALUES('DEMO unified round',clock_timestamp()-interval '1 minute',clock_timestamp()+interval '10 minutes',180,'Synthetic unified question') RETURNING id")).rows[0].id;
- await db.query("INSERT INTO vpo_stage.demo_enrolments(round_id,user_id) VALUES($1,$2)",[round,uid]);
  const en=await db.query("INSERT INTO vpo_stage.academy_enrolments(course_id,user_id,mentor) SELECT course_id,$1,mentor FROM vpo_stage.academy_enrolments WHERE id=$2 RETURNING id",[uid,e.VPO_TEST_ACADEMY_ENROLMENT]);assert.equal(en.rowCount,1);
  }finally{await db.end();}
  await p.goto(base+"/staging");await p.locator("#dashboard").waitFor({state:"visible"});
  await p.locator('a[href="/exam-demo"]').click();await p.waitForURL(base+"/exam-demo");
  await p.locator("#email").fill(email);await p.locator("#password").fill(pass);await p.locator("#login").click();await p.waitForFunction(()=>!document.querySelector("#preflight").disabled);
  await p.locator("#round").fill(round);await p.locator("#preflight").click();await p.waitForFunction(()=>!document.querySelector("#start").disabled);await p.locator("#start").click();await p.waitForFunction(()=>!document.querySelector("#essay").disabled);
+ const guardLogin=await adminCall("login",{username:"admin",password:e.VPO_TEST_ADMIN_PASSWORD},"");assert.equal(guardLogin.status,200);
+ const guard=guardLogin.data.token;
+ for(const op of ["suspend","delete"])assert.equal((await adminCall("change",{id:uid,op},guard)).status,409);
+ assert.equal((await adminCall("logout",{},guard)).status,200);
+ assert.equal((await ctx.request.get(base+"/me")).status(),200);
+ console.log("ACTIVE EXAM GUARD PASS: admin suspend/delete denied while student attempt ACTIVE.");
  await p.locator("#essay").fill("Synthetic gateway examination essay.");await p.locator("#save").click();await p.waitForFunction(()=>/xác nhận bản #1/.test(document.querySelector("#save-status").textContent));p.once("dialog",d=>d.accept());await p.locator("#submit").click();await p.waitForFunction(()=>document.querySelector("#state").textContent==="SUBMITTED");assert.match(await p.locator("#receipt-output").textContent(),/"seq": 1/);
  await p.goto(base+"/staging");await p.locator("#dashboard").waitFor({state:"visible"});
  await p.locator('a[href="/academy-demo"]').click();await p.waitForURL(base+"/academy-demo");
