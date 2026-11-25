@@ -71,4 +71,10 @@ node tests/academy-integration.cjs
 export VPO_CI_OWNER_DB="$(dburl vpo_migrator)"
 node tests/integrity-integration.cjs
 if [[ "${VPO_BROWSER_TESTS:-}" == yes ]]; then node tests/browser-integration.cjs; fi
+if [[ "${VPO_LOAD_RECOVERY_TESTS:-}" == yes ]]; then
+ node tests/load-pilot.cjs
+ kill "$server_pid"
+ wait "$server_pid"
+ bash ci/backup-restore-pilot.sh
+fi
 echo "Synthetic integration smoke passed; NOT a production acceptance."
