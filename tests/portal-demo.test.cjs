@@ -1,0 +1,10 @@
+"use strict";
+const assert=require("node:assert/strict");
+const d=require("../portal.js");
+let s=d.fresh();assert.equal(d.percent(s),0);assert.equal(d.eligible(s),false);assert.deepEqual(d.submit(s),s);
+for(const k of ["profile","academic","achievements","evidence","honesty","rules","privacy"])s=d.edit(s,k,true);
+assert.equal(d.percent(s),100);assert.equal(d.canSubmit(s),true);s=d.submit(s);assert.equal(s.verification,"submitted");assert.equal(d.eligible(s),false);assert.equal(d.edit(s,"profile",false).profile,true);assert.equal(d.canReport(s),false);
+s=d.scenarios("revision");assert.equal(d.canSubmit(s),false);s=d.edit(s,"evidence",true);assert.equal(d.canSubmit(s),true);
+s=d.scenarios("verified");assert.equal(d.canReport(s),true);s=d.report(s);assert.equal(s.payment,"reported");assert.equal(d.eligible(s),false);assert.equal(d.canReport(s),false);
+assert.equal(d.eligible(d.scenarios("paid")),true);assert.equal(d.eligible(d.scenarios("waived")),true);assert.equal(d.eligible({...d.scenarios("paid"),privacy:false}),false);
+console.log("V4.3 demo state checks passed");
