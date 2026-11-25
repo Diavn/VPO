@@ -145,6 +145,11 @@ async function main(){
  assert.equal((await resetCall("verify",{challenge_id:nextId,code:nextMail.code,password:newPass})).status,400);
  console.log("SYNTHETIC RECOVERY PASS: generic request, cross-purpose and unverified denial, five-attempt cap, wrong/replayed code denied, browser reset, old session/password rejected.");
  // Independent expiry and stale-epoch fixtures; no real accounts or clock changes.
+ // Academic administration adds many authenticated requests to this shared service.
+ // Respect its existing 100-request/60-second global window rather than relaxing
+ // the server policy or retrying mutations after an ambiguous response.
+ console.log("Recovery edge suite: allow existing account request window to expire.");
+ await new Promise(resolve=>setTimeout(resolve,61000));
  const edgeDb=new Client({connectionString:e.VPO_CI_OWNER_DB,statement_timeout:10000,connectionTimeoutMillis:3000});
  try{
  await edgeDb.connect();const role=(await edgeDb.query("SELECT current_database() AS db,session_user AS role")).rows[0];assert.deepEqual(role,{db:"vpo_ci",role:"vpo_migrator"});
@@ -160,6 +165,12 @@ async function main(){
   const owner=(await edgeDb.query("SELECT id,auth_epoch FROM vpo_stage.users WHERE email=$1",[address])).rows[0];
   return {owner,payload:{challenge_id:cid,code,password:randomBytes(24).toString("hex")}};
  }
+ // Check immutability directly as the disposable migration owner, not via a mock API.
+ await assert.rejects(()=>edgeDb.query("UPDATE vpo_stage.question_versions SET topic='Disallowed synthetic rewrite' WHERE id=$1",[qpayload.id]),err=>err.code==="23514"&&err.message==="QUESTION_VERSION_IMMUTABLE");
+ await assert.rejects(()=>edgeDb.query("DELETE FROM vpo_stage.question_versions WHERE id=$1",[qpayload.id]),err=>err.code==="23514"&&err.message==="QUESTION_VERSION_IMMUTABLE");
+ const fixed=(await edgeDb.query("SELECT q.topic,r.topic AS round_topic,r.question_version_id FROM vpo_stage.question_versions q JOIN vpo_stage.demo_rounds r ON r.question_version_id=q.id WHERE r.id=$1",[round])).rows[0];
+ assert.equal(fixed.topic,qtopic);assert.equal(fixed.round_topic,qtopic);assert.equal(fixed.question_version_id,qpayload.id);
+ console.log("QUESTION IMMUTABILITY PASS: owner update/delete rejected, original round linkage and topic intact.");
  const expired=await fixture();
  await edgeDb.query("UPDATE vpo_stage.password_reset_challenges SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",[expired.payload.challenge_id]);
  assert.equal((await resetCall("verify",expired.payload)).status,400);
