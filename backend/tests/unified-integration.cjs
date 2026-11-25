@@ -48,7 +48,9 @@ async function main(){
  assert.equal((await adminCall("question-add",qpayload,adminToken)).status,200);
  assert.equal((await adminCall("question-add",{...qpayload,topic:"Conflicting synthetic question"},adminToken)).status,409);
  const q2={...qpayload,id:require("node:crypto").randomUUID(),version:2,topic:"New version of synthetic question"};
- assert.equal((await adminCall("question-add",q2,adminToken)).status,201);
+ const firstCreate=await Promise.all([adminCall("question-add",q2,adminToken),adminCall("question-add",q2,adminToken)]);
+ assert.deepEqual(firstCreate.map(v=>v.status).sort((a,b)=>a-b),[200,201]);
+ assert.deepEqual(firstCreate.map(v=>v.data.result).sort(),["CREATED","REPLAY"]);
  const label="DEMO admin-created round "+randomBytes(4).toString("hex");
  await p.locator("#round-label").fill(label);await p.locator("#round-open").fill(dates.open);await p.locator("#round-close").fill(dates.close);await p.locator("#round-duration").fill("180");await p.locator("#round-topic").fill("Synthetic unified question");
  p.once("dialog",d=>d.accept());const created=await postClick("#create-round","/api/admin/round-from-question",201);const round=(await created.json()).id,roundPayload=created.request().postDataJSON();
