@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# ONLY on an isolated GitHub-hosted CI job with a fresh PostgreSQL service.
+# ONLY on isolated GitHub Actions or Codespaces with a fresh disposable PostgreSQL service.
 set -euo pipefail
-[[ "${GITHUB_ACTIONS:-}" == true && "${VPO_CI_DISPOSABLE:-}" == yes ]] || { echo 'Refusing: disposable CI only'; exit 1; }
+[[ ( "${GITHUB_ACTIONS:-}" == true || "${CODESPACES:-}" == true ) && "${VPO_CI_DISPOSABLE:-}" == yes ]] || { echo 'Refusing: disposable CI only'; exit 1; }
 cd "$(dirname "$0")/.."
 export VPO_MODE=synthetic-staging VPO_ORIGIN=http://localhost:8080 VPO_PORT=8080
 export VPO_CSRF_KEY="$(openssl rand -hex 32)"
