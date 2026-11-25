@@ -11,7 +11,7 @@ const root=path.resolve(__dirname,"../.."),pages=["index","about","competition",
 const files=new Set([...pages.map(x=>x+".html"),"styles.css","app.js","portal.css","portal.js","brand/vpo-mark.svg","brand/vpo-horizontal.svg","brand/vpo-horizontal-dark.svg"]);
 const accountPages=new Set(["/admin","/admin/","/register","/register/","/reset","/bulletin","/bulletin.js","/accounts.css","/accounts.js"]);
 const accountAPI=new Set(["/api/admin/login","/api/admin/logout","/api/admin/users","/api/admin/invite","/api/admin/change","/api/admin/overview","/api/admin/rounds","/api/admin/audit","/api/admin/round-create","/api/admin/enrol","/api/admin/question-list","/api/admin/question-add","/api/admin/round-from-question","/api/admin/academy-catalog","/api/admin/academy-enrol","/api/admin/content-list","/api/admin/content-save","/api/admin/content-transition","/api/register/request","/api/register/verify","/api/reset/request","/api/reset/verify"]);
-const studentPages=new Set(["/staging","/staging.css","/staging.js","/exam-demo","/exam-demo.css","/exam-demo.js","/academy-demo","/academy-demo.css","/academy-demo.js"]);
+const studentPages=new Set(["/staging","/staging.css","/staging.js","/verify-demo","/verify-demo.js","/exam-demo","/exam-demo.css","/exam-demo.js","/academy-demo","/academy-demo.css","/academy-demo.js"]);
 const uuid="[a-fA-F0-9-]{36}";
 const studentAPI=[/^\/auth\/(login|logout)$/,/^\/me(?:\/profile|\/orders|\/results|\/academy|\/rounds)?$/,new RegExp("^/rounds/"+uuid+"/(preflight|attempts)$"),new RegExp("^/attempts/"+uuid+"(?:/(topics|draft|submit|receipt|events))?$"),new RegExp("^/me/orders/"+uuid+"/report$"),new RegExp("^/me/results/"+uuid+"/appeal$"),new RegExp("^/me/academy/"+uuid+"/(portfolio|completion|submissions)$"),/^\/public\/certificates\/[a-f0-9]{64}$/];
 const mime={".html":"text/html; charset=utf-8",".css":"text/css; charset=utf-8",".js":"text/javascript; charset=utf-8",".svg":"image/svg+xml"};
@@ -38,7 +38,7 @@ async function handle(req,res){
  if(method==="GET"&&route==="/healthz"){try{const r=await Promise.all([8080,8082].map(p=>upstream(p,"/healthz","GET",Buffer.alloc(0),{})));return reply(res,r.every(x=>x.status===200)?200:503,{mode:"synthetic-staging",student:r[0].status,accounts:r[1].status});}catch{return reply(res,503,{error:"UPSTREAM_UNAVAILABLE"});}}
  if(method==="GET"&&route.startsWith("/VPO/")&&files.has(route.slice(5))){
   const file=route.slice(5);let b=fs.readFileSync(path.join(root,file));
-  if(file.endsWith(".html"))b=Buffer.from(b.toString("utf8").replace("</header>",'</header><nav class="wrap actions" aria-label="Private staging services"><a href="/staging">Student Dashboard</a> <a href="/register">Register / Đăng ký mẫu</a> <a href="/admin">Admin</a> <a href="/bulletin">Bản tin mẫu / Bulletin</a></nav>'));
+  if(file.endsWith(".html"))b=Buffer.from(b.toString("utf8").replace("</header>",'</header><nav class="wrap actions" aria-label="Private staging services"><a href="/staging">Student Dashboard</a> <a href="/register">Register / Đăng ký mẫu</a> <a href="/admin">Admin</a> <a href="/bulletin">Bản tin mẫu / Bulletin</a> <a href="/verify-demo">Xác minh mẫu</a></nav>'));
   res.writeHead(200,headers(mime[path.extname(file)]));return res.end(b);
  }
  let port=0;
