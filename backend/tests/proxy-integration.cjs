@@ -40,8 +40,14 @@ async function main(){
  const student={Cookie:cookie.split(";")[0],"X-CSRF-Token":st.data.csrf,Origin:"http://127.0.0.1:8080",...meta};
  assert.equal((await call(8080,"/me","GET",undefined,student)).status,200);
  assert.equal((await call(8080,"/auth/logout","POST",undefined,{...student,Origin:"http://localhost:8082"})).status,403);
- assert.equal((await call(8080,"/auth/logout","POST",undefined,student)).status,200);
+ // Carry the same secure session through the unified origin. Do not spend another login.
+ const gatewayStudent={...student,Origin:"http://127.0.0.1:8091"};
+ assert.equal((await call(8091,"/me","GET",undefined,gatewayStudent)).status,200);
+ assert.equal((await call(8091,"/auth/logout","POST",undefined,{...gatewayStudent,Origin:"http://localhost:8080"})).status,403);
+ assert.equal((await call(8091,"/auth/logout","POST",undefined,{...gatewayStudent,"X-CSRF-Token":"0".repeat(64)})).status,403);
+ const gone=await call(8091,"/auth/logout","POST",undefined,gatewayStudent);assert.equal(gone.status,200);assert.match(gone.headers["set-cookie"][0],/Max-Age=0/);
  assert.equal((await call(8080,"/me","GET",undefined,student)).status,401);
+ console.log("UNIFIED SECURE STUDENT PASS: cookie forwarding, wrong Origin/CSRF denied, logout clears session.");
  const through=await call(8091,"/api/admin/login","POST",credentials,{Origin:"http://localhost:8091",...meta});assert.equal(through.status,200);
  const throughAuth={Origin:"http://127.0.0.1:8091",...meta,Authorization:"Bearer "+through.data.token};
  assert.equal((await call(8091,"/api/admin/users","POST",{search:e.VPO_TEST_A_EMAIL},throughAuth)).status,200);
