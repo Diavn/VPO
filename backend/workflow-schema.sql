@@ -24,6 +24,7 @@ CREATE TABLE vpo_stage.demo_marks (
 CREATE TABLE vpo_stage.demo_results (
  case_id uuid PRIMARY KEY REFERENCES vpo_stage.demo_marking_cases(id),
  score numeric(4,1) NOT NULL CHECK(score BETWEEN 0 AND 20),
+ adjudicated_scores smallint[] CHECK(adjudicated_scores IS NULL OR (cardinality(adjudicated_scores)=5 AND array_ndims(adjudicated_scores)=1 AND array_position(adjudicated_scores,NULL) IS NULL AND 0<=ALL(adjudicated_scores) AND 4>=ALL(adjudicated_scores))),
  award text NOT NULL CHECK(award IN ('NONE','FIRST','SECOND','THIRD','HONORABLE_MENTION')),
  reason text NOT NULL CHECK(octet_length(reason) BETWEEN 1 AND 2000),
  moderator name NOT NULL REFERENCES vpo_stage.demo_staff(login_name),
