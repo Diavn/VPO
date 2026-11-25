@@ -26,7 +26,7 @@ GRANT CREATE ON DATABASE vpo_ci TO vpo_migrator;
 SQL
 dburl(){ printf 'postgresql://%s:%s@127.0.0.1:5432/vpo_ci' "$1" "${pass[$1]}"; }
 owner(){ PGUSER=vpo_migrator PGPASSWORD="${pass[vpo_migrator]}" psql -X -v ON_ERROR_STOP=1 "$@"; }
-for migration in schema.sql grants.sql exam-schema.sql workflow-schema.sql workflow-functions.sql academy-schema.sql academy-functions.sql; do
+for migration in schema.sql grants.sql exam-schema.sql workflow-schema.sql workflow-functions.sql academy-schema.sql academy-functions.sql integrity.sql; do
  echo "Applying $migration"
  owner -q -f "$migration"
 done
@@ -68,4 +68,6 @@ for role in ci_exam_a ci_exam_b ci_moderator ci_approver ci_publisher ci_finance
 done
 node tests/workflow-integration.cjs
 node tests/academy-integration.cjs
+export VPO_CI_OWNER_DB="$(dburl vpo_migrator)"
+node tests/integrity-integration.cjs
 echo "Synthetic integration smoke passed; NOT a production acceptance."
