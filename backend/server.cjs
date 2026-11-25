@@ -46,7 +46,7 @@ function requireCsrf(req,a){if(!S.eq(req.headers["x-csrf-token"],S.csrf(a.token,
 const projection="student_code,name_vi,name_latin,grade,curriculum,locale,version";
 let dummy, activeHashes=0;
 async function handle(req,res){
- if(req.headers.host!==c.host)throw fail(400,"INVALID_HOST");
+ if(!S.hostAllowed(req.headers.host,c)){console.error("HOST_REJECTED",JSON.stringify(String(req.headers.host||"").slice(0,180)));throw fail(400,"INVALID_HOST");}
  if(!["GET","POST","PATCH","PUT"].includes(req.method))throw fail(405,"METHOD_NOT_ALLOWED");
  if(req.method!=="GET"&&req.headers.origin!==c.origin)throw fail(403,"ORIGIN_REQUIRED");
  const path=req.url;
