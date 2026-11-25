@@ -1,19 +1,19 @@
-name: VPO V6.6.1 operational finance master regression
+name: VPO V6.6.2 demo certificate master regression
 on:
   push:
-    branches: [v6.6.1-operational-finance]
+    branches: [v6.6.2-demo-certificates]
   pull_request:
-    branches: [v6.6-finance-results]
+    branches: [v6.6.1-operational-finance]
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: vpo-operational-finance
+  group: vpo-demo-certificates
   cancel-in-progress: true
 jobs:
   fresh-launch:
-    if: github.ref == 'refs/heads/v6.6.1-operational-finance' || (github.event_name == 'pull_request' && github.head_ref == 'v6.6.1-operational-finance' && github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.ref == 'refs/heads/v6.6.2-demo-certificates' || (github.event_name == 'pull_request' && github.head_ref == 'v6.6.2-demo-certificates' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -41,12 +41,24 @@ jobs:
       - name: Install browser test dependencies
         working-directory: backend
         run: |
-          npm install --ignore-scripts --no-audit --no-fund
+          npm ci --ignore-scripts --no-audit --no-fund
           npx --no-install playwright install --with-deps chromium
       - name: All unit and public portal tests
         run: |
           (cd backend && npm test)
           node tests/portal-demo.test.cjs
+      - name: Render synthetic PDF and decode printed QR
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends poppler-utils
+          node backend/tests/rendered-certificate.cjs
+      - name: Verify locked dependencies and generate SBOM
+        working-directory: backend
+        run: |
+          echo 'c70a7cb1c891e8057b344bfe9fa0c55db26efad305bbce1c612238c092e8765a  package-lock.json' | sha256sum -c -
+          npm sbom --sbom-format cyclonedx --omit=dev > "$RUNNER_TEMP/vpo-runtime-sbom.json"
+          node -e 'const s=require(process.env.RUNNER_TEMP+"/vpo-runtime-sbom.json");if(s.bomFormat!=="CycloneDX"||!s.components?.length)process.exit(1);console.log("SBOM PASS: "+s.components.length+" runtime components")'
+          git diff --exit-code -- package.json package-lock.json
       - name: Launch full master regression
         run: bash backend/staging/launch.sh --check
       - name: Dependency vulnerability check (runtime)

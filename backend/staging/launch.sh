@@ -57,7 +57,7 @@ for i in $(seq 1 60); do
 done
 [[ "$(psql -XAt -v ON_ERROR_STOP=1 -c 'SELECT current_database()')" == vpo_ci ]]
 [[ "$(psql -XAt -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_namespace WHERE nspname='vpo_stage'")" == 0 ]]
-npm install --ignore-scripts --no-audit --no-fund
+npm ci --ignore-scripts --no-audit --no-fund
 declare -A pass
 roles=(vpo_migrator vpo_runtime vpo_provision vpo_accounts ci_exam_a ci_exam_b ci_moderator ci_approver ci_publisher ci_finance ci_appeal ci_cert ci_cert_approver ci_mentor_a ci_mentor_b)
 for role in "${roles[@]}"; do
@@ -176,7 +176,7 @@ if [[ "$mode" == --check ]]; then
  VPO_TEST_ACCOUNTS_DB="$(dburl vpo_accounts)" VPO_TEST_ADMIN_HASH="$admin_hash" VPO_TEST_MAIL_KEY="$mail_key" VPO_TEST_MAIL_DIR="$mail_dir" VPO_TEST_ADMIN_PASSWORD="$admin_password" node tests/proxy-integration.cjs
  unset admin_hash mail_key admin_password
  bash ci/backup-restore-pilot.sh
- echo 'V6.6.1 master regression PASS; synthetic only; real proxy UAT and production acceptance not established.'
+ echo 'V6.6.2 master regression PASS; synthetic only; real proxy UAT and production acceptance not established.'
  exit 0
 fi
 echo '=== VPO PRIVATE STAGING / SYNTHETIC DATA ONLY ==='

@@ -17,7 +17,7 @@ for i in $(seq 1 60); do
  sleep 1
 done
 PGPASSWORD="$PGPASSWORD" psql -XAt -h 127.0.0.1 -U postgres -d vpo_ci -c 'SELECT 1' >/dev/null
-npm install --ignore-scripts --no-audit --no-fund
+npm ci --ignore-scripts --no-audit --no-fund
 npm test
 node ../tests/portal-demo.test.cjs
 bash ci/disposable-integration.sh
