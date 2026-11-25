@@ -57,4 +57,6 @@ document.addEventListener("visibilitychange",()=>event(document.hidden?"HIDDEN":
 window.addEventListener("online",()=>{event("RECONNECTED");if(!busy&&!conflict&&!closed&&(pending||dirty()))run(save);});
 window.addEventListener("offline",()=>set("save-status","Mất mạng. Không đóng trang; phần chưa xác nhận chưa được lưu."));
 window.addEventListener("beforeunload",e=>{if(dirty()||pending){e.preventDefault();e.returnValue="";}});
+const selectedRound=new URLSearchParams(location.search).get("round");
+if(selectedRound&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(selectedRound))el("round").value=selectedRound;
 controls();
