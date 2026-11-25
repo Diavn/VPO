@@ -26,7 +26,8 @@ async function main(){
  const server=http.createServer({requestTimeout:10000,headersTimeout:5000,maxHeaderSize:8192},async(req,res)=>{
  try{
  if(!S.hostAllowed(req.headers.host,c)){console.error("HOST_REJECTED",JSON.stringify(String(req.headers.host||"").slice(0,180)));throw fail(421,"HOST");}
- if(req.method==="GET"&&Object.hasOwn(assets,req.url)){const [file,type]=assets[req.url];return send(res,200,fs.readFileSync(path.join(__dirname,file)),type);}
+ const assetPath=req.method==="GET"&&typeof req.url==="string"&&req.url.length<=2048?req.url.split("?",1)[0]:null;
+ if(assetPath!==null&&Object.hasOwn(assets,assetPath)){const [file,type]=assets[assetPath];return send(res,200,fs.readFileSync(path.join(__dirname,file)),type);}
  if(req.method!=="POST")throw fail(404,"NOT_FOUND");
  if(req.headers.origin!==c.origin)throw fail(403,"ORIGIN");
  const now=Date.now();if(now-windowStart>=60000){windowStart=now;requests=0;for(const [k,v] of limits)if(v.until<=now)limits.delete(k);for(const [k,v] of sessions)if(v<=now)sessions.delete(k);}
