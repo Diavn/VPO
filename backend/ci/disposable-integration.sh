@@ -70,4 +70,5 @@ node tests/workflow-integration.cjs
 node tests/academy-integration.cjs
 export VPO_CI_OWNER_DB="$(dburl vpo_migrator)"
 node tests/integrity-integration.cjs
+if [[ "${VPO_BROWSER_TESTS:-}" == yes ]]; then node tests/browser-integration.cjs; fi
 echo "Synthetic integration smoke passed; NOT a production acceptance."
