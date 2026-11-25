@@ -7,7 +7,7 @@ const fs=require("node:fs"),pathLib=require("node:path");
 const demoAssets=Object.fromEntries([["/exam-demo","exam.html","text/html; charset=utf-8"],["/exam-demo.js","exam.js","text/javascript; charset=utf-8"],["/exam-demo.css","exam.css","text/css; charset=utf-8"]].map(([url,file,type])=>[url,{type,body:fs.readFileSync(pathLib.join(__dirname,"exam-client",file))}]));
 for(const [url,file,type] of [["/academy-demo","academy.html","text/html; charset=utf-8"],["/academy-demo.js","academy.js","text/javascript; charset=utf-8"],["/academy-demo.css","academy.css","text/css; charset=utf-8"]])demoAssets[url]={type,body:fs.readFileSync(pathLib.join(__dirname,"academy-client",file))};
 for(const [url,file,type] of [["/staging","staging.html","text/html; charset=utf-8"],["/staging.css","staging.css","text/css; charset=utf-8"],["/staging.js","staging.js","text/javascript; charset=utf-8"],["/verify-demo","verify.html","text/html; charset=utf-8"],["/verify-demo.js","verify.js","text/javascript; charset=utf-8"]])demoAssets[url]={type,body:fs.readFileSync(pathLib.join(__dirname,"staging-client",file))};
-const c=S.config(process.env);
+const c=S.config(process.env),{renderSlip}=require("./certificate-slip.cjs");
 const pool=new Pool({connectionString:process.env.DATABASE_URL,max:8,connectionTimeoutMillis:3000,idleTimeoutMillis:10000,statement_timeout:5000,query_timeout:6000});
 pool.on("error",()=>console.error("Database pool error"));
 const q=(sql,p=[])=>pool.query(sql,p);
@@ -106,12 +106,17 @@ async function handle(req,res){
  }
 
  // V4.6 local synthetic student workflow; no staff HTTP routes.
- const cv=/^\/public\/certificates\/([^/]+)$/.exec(path);
+ const cv=/^\/public\/certificates\/([^/]+)(\/document\.pdf)?$/.exec(path);
  if(cv&&req.method==="GET"){
   await limit("demo-certificate-global",300);
   if(!W.validToken(cv[1]))throw fail(404,"NOT_FOUND");
   const r=await q("SELECT vpo_stage.demo_verify_certificate($1) AS value",[cv[1]]);
   if(!r.rows[0].value)throw fail(404,"NOT_FOUND");
+  if(cv[2]){
+   if(r.rows[0].value.status!=="VALID_DEMO")throw fail(409,"CERTIFICATE_NOT_VALID");
+   const pdf=await renderSlip(r.rows[0].value,cv[1],c,process.env);
+   res.writeHead(200,{"Content-Type":"application/pdf","Content-Disposition":'attachment; filename="VPO-DEMO-verification.pdf"',"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer","X-Frame-Options":"DENY","Content-Security-Policy":"default-src 'none'; frame-ancestors 'none'; sandbox",...(c.secure?{"Strict-Transport-Security":"max-age=31536000"}:{})});return res.end(pdf);
+  }
   return reply(res,200,r.rows[0].value);
  }
  const ow=/^\/me\/orders\/([^/]+)\/report$/.exec(path),aw=/^\/me\/results\/([^/]+)\/appeal$/.exec(path);
