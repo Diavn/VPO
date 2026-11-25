@@ -12,14 +12,14 @@ esac
 cd "$(dirname "$0")/.."
 for cmd in docker psql node npm openssl curl; do command -v "$cmd" >/dev/null || { echo "Missing $cmd"; exit 1; }; done
 [[ "$(node -p 'process.versions.node.split(".")[0]')" == 22 ]] || { echo 'Node 22 required'; exit 1; }
-ports=(5432 8080 8082)
+ports=(5432 8080 8082 8091)
 [[ "$mode" != --check ]] || ports+=(8081 8090)
 for port in "${ports[@]}"; do
  if (echo >/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then echo "Port $port occupied; refusing to touch existing services"; exit 1; fi
 done
 export VPO_MODE=synthetic-staging VPO_PORT=8080 VPO_ORIGIN=http://localhost:8080 VPO_CODESPACES_PROXY=no
 if [[ "$mode" != --check ]]; then
- echo 'Keep forwarded ports 8080, 8082 Private (8081 only for local staff desk). Do not forward PostgreSQL (5432).'
+ echo 'Forward only 8091 as Private (8081 only for local staff desk). Remove existing 8080/8082 forwarding; never forward PostgreSQL (5432).'
  read -r -p 'Type PRIVATE to confirm: ' confirmation
  [[ "$confirmation" == PRIVATE ]] || exit 1
 fi
@@ -37,8 +37,10 @@ tmp="$(mktemp -d)"
 server_pid=""
 desk_pid=""
 accounts_pid=""
+gateway_pid=""
 container_id=""
 cleanup(){
+ if [[ -n "$gateway_pid" ]]; then kill "$gateway_pid" 2>/dev/null || true; wait "$gateway_pid" 2>/dev/null || true; fi
  if [[ -n "$accounts_pid" ]]; then kill "$accounts_pid" 2>/dev/null || true; wait "$accounts_pid" 2>/dev/null || true; fi
  if [[ -n "$desk_pid" ]]; then kill "$desk_pid" 2>/dev/null || true; wait "$desk_pid" 2>/dev/null || true; fi
  if [[ -n "$server_pid" ]]; then kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true; fi
@@ -130,6 +132,16 @@ for i in $(seq 1 30); do
  sleep 1
 done
 curl --noproxy '*' -fsS -H "Host: ${account_origin#*://}" http://127.0.0.1:8082/healthz >/dev/null
+gateway_origin=http://localhost:8091
+if [[ "$mode" == private ]]; then gateway_origin="https://${CODESPACE_NAME}-8091.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"; fi
+env -i PATH="$PATH" CODESPACES="${CODESPACES:-}" GITHUB_ACTIONS="${GITHUB_ACTIONS:-}" VPO_MODE=synthetic-staging VPO_ORIGIN="$gateway_origin" VPO_CODESPACES_PROXY="$VPO_CODESPACES_PROXY" CODESPACE_NAME="${CODESPACE_NAME:-}" GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}" node gateway/server.cjs >"$tmp/gateway.log" 2>&1 &
+gateway_pid=$!
+for i in $(seq 1 30); do
+ if curl --noproxy '*' -fsS -H "Host: ${gateway_origin#*://}" http://127.0.0.1:8091/healthz >/dev/null 2>&1; then break; fi
+ kill -0 "$gateway_pid" || { echo 'Gateway stopped'; exit 1; }
+ sleep 1
+done
+curl --noproxy '*' -fsS -H "Host: ${gateway_origin#*://}" http://127.0.0.1:8091/healthz >/dev/null
 if [[ "$mode" == --check ]]; then
  VPO_TEST_ADMIN_PASSWORD="$admin_password" VPO_TEST_MAIL_DIR="$mail_dir" node tests/account-management.cjs
 fi
@@ -156,6 +168,8 @@ if [[ "$mode" == --check ]]; then
  node tests/security-integration.cjs
  node tests/mock-deadline.cjs
  node tests/load-pilot.cjs
+ VPO_TEST_ADMIN_PASSWORD="$admin_password" VPO_TEST_MAIL_DIR="$mail_dir" node tests/unified-integration.cjs
+ kill "$gateway_pid"; wait "$gateway_pid"; gateway_pid=""
  # Stop all HTTP writers before proxy simulation and offline restore.
  kill "$accounts_pid"; wait "$accounts_pid"; accounts_pid=""
  kill "$server_pid"; wait "$server_pid"; server_pid=""
@@ -166,8 +180,8 @@ if [[ "$mode" == --check ]]; then
  exit 0
 fi
 echo '=== VPO PRIVATE STAGING / SYNTHETIC DATA ONLY ==='
-printf 'Admin: %s/admin (username admin)\nRegistration: %s/register\nKeep port 8082 Private too.\n' "$account_origin" "$account_origin"
-printf 'Dashboard: %s/staging\nExam: %s/exam-demo\nAcademy: %s/academy-demo\n' "$VPO_ORIGIN" "$VPO_ORIGIN" "$VPO_ORIGIN"
+printf 'Unified website: %s/\nAdmin: %s/admin (username admin)\nRegistration: %s/register\nForward only 8091 Private.\n' "$gateway_origin" "$gateway_origin" "$gateway_origin"
+printf 'Dashboard: %s/staging\nExam: %s/exam-demo\nAcademy: %s/academy-demo\n' "$gateway_origin" "$gateway_origin" "$gateway_origin"
 printf 'A (enrolled): %s\nPassword A: %s\nB (not enrolled): %s\nPassword B: %s\nRound UUID: %s\n' "$VPO_TEST_A_EMAIL" "$VPO_TEST_A_PASSWORD" "$VPO_TEST_B_EMAIL" "$VPO_TEST_B_PASSWORD" "$VPO_TEST_ROUND"
 echo 'Passwords are generated for this run only. Do not share terminal screenshots or real data.'
 echo 'Keep the port Private. Ctrl+C stops this instance and deletes its disposable database.'
@@ -175,7 +189,7 @@ echo 'Keep the port Private. Ctrl+C stops this instance and deletes its disposab
 # role-separated DB credentials stay in this process; no independent human sign-off.
 echo 'Operator commands: seed | staff ROLE OP [UUID] | desk ROLE | desk-stop | mail UUID | diagnose | quit'
 echo 'For staff mutations, enter JSON on the next line (or {} for no arguments).'
-while kill -0 "$server_pid" 2>/dev/null && kill -0 "$accounts_pid" 2>/dev/null; do
+while kill -0 "$server_pid" 2>/dev/null && kill -0 "$accounts_pid" 2>/dev/null && kill -0 "$gateway_pid" 2>/dev/null; do
  read -r -p 'VPO mock> ' cmd role action obj extra || break
  case "$cmd" in
  quit) break;;
@@ -183,7 +197,8 @@ while kill -0 "$server_pid" 2>/dev/null && kill -0 "$accounts_pid" 2>/dev/null; 
   echo "Build: $(git rev-parse --short HEAD) (working tree; running code may differ)";
   printf "Student HTTP: "; curl --noproxy "*" -sS -o /dev/null -w "%{http_code}\\n" -H "Host: $host" http://127.0.0.1:8080/healthz || true
   printf "Account HTTP: "; curl --noproxy "*" -sS -o /dev/null -w "%{http_code}\\n" -H "Host: ${account_origin#*://}" http://127.0.0.1:8082/healthz || true
-  echo "Recent rejected Host, Origin and GET route values (no credentials):"; grep -hE "^(HOST_REJECTED|ORIGIN_REJECTED|ROUTE_REJECTED) " "$tmp/accounts.log" "$tmp/server.log" | tail -n 10 || true;;
+  printf "Unified HTTP: "; curl --noproxy "*" -sS -o /dev/null -w "%{http_code}\n" -H "Host: ${gateway_origin#*://}" http://127.0.0.1:8091/healthz || true
+  echo "Recent rejected Host, Origin and GET route values (no credentials):"; grep -hE "^(HOST_REJECTED|ORIGIN_REJECTED|ROUTE_REJECTED) " "$tmp/accounts.log" "$tmp/server.log" "$tmp/gateway.log" | tail -n 10 || true;;
  mail)
   [[ "$role" =~ ^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$ && -z "$action$obj$extra" ]] || { echo 'Usage: mail UUID'; continue; }
   if [[ -f "$mail_dir/$role.json" ]]; then cat "$mail_dir/$role.json"; echo; else echo 'No matching synthetic message'; fi;;
